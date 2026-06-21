@@ -1,4 +1,6 @@
-// RepoDocs AI — popup UI logic. Classic script, no build step.
+// RepoDocs AI — popup UI logic. ES module (so it can import the provider catalog), no build step.
+
+import { PROVIDER_CATALOG, detectProviderFromKey } from '../background/providers.js';
 
 const SETTINGS_KEY = 'repodocs_settings';
 const GALLERY_KEY = 'repodocs_gallery';
@@ -9,17 +11,17 @@ const els = {
   doneView: document.getElementById('done-view'),
   errorView: document.getElementById('error-view'),
 
-  keyGroq: document.getElementById('key-groq'),
-  keyCerebras: document.getElementById('key-cerebras'),
-  keyGemini: document.getElementById('key-gemini'),
-  keyOpenrouter: document.getElementById('key-openrouter'),
+  connections: document.getElementById('connections'),
+  addConnectionBtn: document.getElementById('add-connection-btn'),
+  resetConnectionsBtn: document.getElementById('reset-connections-btn'),
+
   repoInput: document.getElementById('repo-input'),
   githubToken: document.getElementById('github-token'),
-  captureScreenshot: document.getElementById('capture-screenshot'),
   generateBtn: document.getElementById('generate-btn'),
   setupError: document.getElementById('setup-error'),
 
   captureVisibleBtn: document.getElementById('capture-visible-btn'),
+  captureAreaBtn: document.getElementById('capture-area-btn'),
   captureFullpageBtn: document.getElementById('capture-fullpage-btn'),
   captureWindowBtn: document.getElementById('capture-window-btn'),
   uploadImagesBtn: document.getElementById('upload-images-btn'),
@@ -39,6 +41,8 @@ const els = {
 
   errorMessage: document.getElementById('error-message'),
   retryBtn: document.getElementById('retry-btn'),
+
+  resetBtn: document.getElementById('reset-btn'),
 };
 
 let timerInterval = null;
@@ -54,32 +58,162 @@ function showView(name) {
   els.errorView.hidden = name !== 'error';
 }
 
-function readSettings() {
-  return {
-    groq: els.keyGroq.value.trim(),
-    cerebras: els.keyCerebras.value.trim(),
-    gemini: els.keyGemini.value.trim(),
-    openrouter: els.keyOpenrouter.value.trim(),
-    githubToken: els.githubToken.value.trim(),
-    repoInput: els.repoInput.value.trim(),
-    captureScreenshot: els.captureScreenshot.checked,
-  };
+// ---------- provider connections (AI keys) ----------
+let connections = [];
+let connSeq = 0;
+function newConnection() {
+  return { id: `c${++connSeq}`, providerId: '', key: '', status: 'idle', error: '' };
 }
 
+function providerOptionsHtml(selectedId) {
+  const free = PROVIDER_CATALOG.filter(p => p.free);
+  const paid = PROVIDER_CATALOG.filter(p => !p.free);
+  const opt = p => `<option value="${p.id}" ${p.id === selectedId ? 'selected' : ''}>${p.label}</option>`;
+  return `
+    <option value="">Auto-detect from key…</option>
+    <optgroup label="Free">${free.map(opt).join('')}</optgroup>
+    <optgroup label="Paid">${paid.map(opt).join('')}</optgroup>
+  `;
+}
+
+function statusBadgeHtml(conn) {
+  if (conn.status === 'connected') return `<span class="status-dot status-green" title="Connected"></span><span class="status-text status-green">Connected</span>`;
+  if (conn.status === 'testing') return `<span class="status-dot status-yellow" title="Testing…"></span><span class="status-text">Testing…</span>`;
+  if (conn.status === 'error') return `<span class="status-dot status-red" title="${(conn.error || 'Error').replace(/"/g, '&quot;')}"></span><span class="status-text status-red">${conn.error || 'Failed'}</span>`;
+  return `<span class="status-dot" title="Not tested"></span><span class="status-text">Not connected</span>`;
+}
+
+function renderConnections() {
+  els.connections.innerHTML = connections.map(conn => {
+    const provider = PROVIDER_CATALOG.find(p => p.id === conn.providerId);
+    const placeholder = provider?.placeholder || 'Paste API key…';
+    return `
+      <div class="conn-row" data-id="${conn.id}">
+        <div class="conn-row-top">
+          <select class="conn-select" data-action="provider" data-id="${conn.id}">${providerOptionsHtml(conn.providerId)}</select>
+          ${connections.length > 1 ? `<button type="button" class="icon-btn remove" data-action="remove" data-id="${conn.id}" title="Remove">🗑️</button>` : ''}
+        </div>
+        <div class="conn-row-bottom">
+          <input type="password" class="conn-key" data-action="key" data-id="${conn.id}" placeholder="${placeholder}" autocomplete="off" value="${(conn.key || '').replace(/"/g, '&quot;')}" />
+          <button type="button" class="chip-btn detect-btn" data-action="detect" data-id="${conn.id}">Detect</button>
+        </div>
+        <div class="conn-status">${statusBadgeHtml(conn)}</div>
+      </div>
+    `;
+  }).join('');
+}
+
+function persistConnections() {
+  return chrome.storage.local.set({ [SETTINGS_KEY]: { ...currentNonConnSettings(), connections } });
+}
+
+function currentNonConnSettings() {
+  return { repoInput: els.repoInput.value.trim(), githubToken: els.githubToken.value.trim() };
+}
+
+els.connections.addEventListener('change', e => {
+  const select = e.target.closest('[data-action="provider"]');
+  if (!select) return;
+  const conn = connections.find(c => c.id === select.dataset.id);
+  if (!conn) return;
+  conn.providerId = select.value;
+  conn.status = 'idle';
+  conn.error = '';
+  renderConnections();
+  persistConnections();
+});
+
+els.connections.addEventListener('input', e => {
+  const input = e.target.closest('[data-action="key"]');
+  if (!input) return;
+  const conn = connections.find(c => c.id === input.dataset.id);
+  if (!conn) return;
+  conn.key = input.value;
+  if (conn.status !== 'idle') {
+    conn.status = 'idle';
+    conn.error = '';
+    const badge = els.connections.querySelector(`.conn-row[data-id="${conn.id}"] .conn-status`);
+    if (badge) badge.innerHTML = statusBadgeHtml(conn);
+  }
+  persistConnections();
+});
+
+els.connections.addEventListener('click', async e => {
+  const btn = e.target.closest('[data-action]');
+  if (!btn) return;
+  const conn = connections.find(c => c.id === btn.dataset.id);
+  if (!conn) return;
+
+  if (btn.dataset.action === 'remove') {
+    connections = connections.filter(c => c.id !== conn.id);
+    renderConnections();
+    await persistConnections();
+    return;
+  }
+  if (btn.dataset.action === 'detect') {
+    const key = conn.key.trim();
+    if (!key) {
+      conn.status = 'error';
+      conn.error = 'Paste a key first.';
+      renderConnections();
+      return;
+    }
+    let providerId = conn.providerId;
+    if (!providerId) {
+      providerId = detectProviderFromKey(key);
+      if (!providerId) {
+        conn.status = 'error';
+        conn.error = "Couldn't auto-detect — pick a provider above.";
+        renderConnections();
+        return;
+      }
+      conn.providerId = providerId;
+    }
+    conn.status = 'testing';
+    conn.error = '';
+    renderConnections();
+    const res = await sendToBackground('provider:test', { providerId, key });
+    if (res?.ok) {
+      conn.status = 'connected';
+      conn.error = '';
+    } else {
+      conn.status = 'error';
+      conn.error = res?.error || 'Connection failed.';
+    }
+    renderConnections();
+    await persistConnections();
+  }
+});
+
+els.addConnectionBtn.addEventListener('click', () => {
+  connections.push(newConnection());
+  renderConnections();
+  persistConnections();
+});
+
+els.resetConnectionsBtn.addEventListener('click', () => {
+  connections = [newConnection()];
+  renderConnections();
+  persistConnections();
+});
+
+function hasAnyConfiguredKey() {
+  return connections.some(c => c.providerId && c.key.trim());
+}
+
+// ---------- settings (repo/token) ----------
 async function saveSettings() {
-  await chrome.storage.local.set({ [SETTINGS_KEY]: readSettings() });
+  await chrome.storage.local.set({ [SETTINGS_KEY]: { ...currentNonConnSettings(), connections } });
 }
 
 async function loadSettings() {
   const { [SETTINGS_KEY]: s } = await chrome.storage.local.get(SETTINGS_KEY);
-  if (!s) return;
-  els.keyGroq.value = s.groq || '';
-  els.keyCerebras.value = s.cerebras || '';
-  els.keyGemini.value = s.gemini || '';
-  els.keyOpenrouter.value = s.openrouter || '';
-  els.githubToken.value = s.githubToken || '';
-  els.repoInput.value = s.repoInput || '';
-  els.captureScreenshot.checked = Boolean(s.captureScreenshot);
+  els.repoInput.value = s?.repoInput || '';
+  els.githubToken.value = s?.githubToken || '';
+  connections = Array.isArray(s?.connections) && s.connections.length
+    ? s.connections.map(c => ({ ...newConnection(), ...c, status: c.status === 'connected' ? 'connected' : 'idle', error: '' }))
+    : [newConnection()];
+  renderConnections();
 }
 
 function sendToBackground(type, payload) {
@@ -145,6 +279,7 @@ function setCaptureStatus(text) {
 function setCaptureButtonsDisabled(disabled) {
   captureBusy = disabled;
   els.captureVisibleBtn.disabled = disabled;
+  els.captureAreaBtn.disabled = disabled;
   els.captureFullpageBtn.disabled = disabled;
   els.captureWindowBtn.disabled = disabled;
   els.uploadImagesBtn.disabled = disabled;
@@ -232,7 +367,7 @@ function loadImageEl(src) {
   });
 }
 
-// ---------- visible tab / full page capture (round-trip through background) ----------
+// ---------- visible tab / select-area / full page capture (round-trip through background) ----------
 els.captureVisibleBtn.addEventListener('click', async () => {
   if (captureBusy) return;
   setCaptureButtonsDisabled(true);
@@ -244,6 +379,23 @@ els.captureVisibleBtn.addEventListener('click', async () => {
     setCaptureStatus('Captured.');
   } catch (err) {
     setCaptureStatus(`Capture failed: ${err.message}`);
+  } finally {
+    setCaptureButtonsDisabled(false);
+    setTimeout(() => setCaptureStatus(''), 2000);
+  }
+});
+
+els.captureAreaBtn.addEventListener('click', async () => {
+  if (captureBusy) return;
+  setCaptureButtonsDisabled(true);
+  setCaptureStatus('Drag to select an area on the page (Esc to cancel)…');
+  try {
+    const res = await sendToBackground('capture:area');
+    if (res?.error) throw new Error(res.error);
+    await addImageToGallery({ ...res.result, caption: 'Custom area capture' });
+    setCaptureStatus('Captured.');
+  } catch (err) {
+    setCaptureStatus(err.message === 'Selection cancelled.' ? '' : `Capture failed: ${err.message}`);
   } finally {
     setCaptureButtonsDisabled(false);
     setTimeout(() => setCaptureStatus(''), 2000);
@@ -370,32 +522,26 @@ chrome.runtime.onMessage.addListener(msg => {
 
 els.generateBtn.addEventListener('click', async () => {
   els.setupError.hidden = true;
-  const settings = readSettings();
-  const hasKey = settings.groq || settings.cerebras || settings.gemini || settings.openrouter;
-  if (!hasKey) {
-    els.setupError.textContent = 'Add at least one free AI provider key above.';
+  if (!hasAnyConfiguredKey()) {
+    els.setupError.textContent = 'Add and detect at least one AI provider key above.';
     els.setupError.hidden = false;
     return;
   }
-  if (!settings.repoInput) {
-    els.setupError.textContent = 'Enter a GitHub repository URL, owner/repo, or website URL.';
+  const repoInput = els.repoInput.value.trim();
+  if (!repoInput) {
+    els.setupError.textContent = 'Enter a GitHub repository URL or owner/repo.';
     els.setupError.hidden = false;
     return;
   }
 
   await saveSettings();
 
-  if (settings.captureScreenshot) {
-    await sendToBackground('request-screenshot-permission');
-  }
-
-  currentRepoLabel = settings.repoInput;
+  currentRepoLabel = repoInput;
   els.generateBtn.disabled = true;
   await sendToBackground('job:start', {
-    repoInput: settings.repoInput,
-    keys: { groq: settings.groq, cerebras: settings.cerebras, gemini: settings.gemini, openrouter: settings.openrouter },
-    githubToken: settings.githubToken,
-    captureScreenshot: settings.captureScreenshot,
+    repoInput,
+    connections: connections.filter(c => c.providerId && c.key.trim()).map(c => ({ providerId: c.providerId, key: c.key.trim() })),
+    githubToken: els.githubToken.value.trim(),
     manualImages: gallery.map(g => ({ dataUrl: g.dataUrl, width: g.width, height: g.height, caption: g.caption })),
   });
   els.generateBtn.disabled = false;
@@ -418,13 +564,20 @@ els.downloadDocxBtn.addEventListener('click', () => {
   sendToBackground('download', { url: currentResult.docxDataUrl, filename: `${currentResult.repoName}-documentation.docx` });
 });
 
-els.newJobBtn.addEventListener('click', async () => {
+// Cancels any in-flight job, clears the result/error, and returns to the setup screen so the
+// user can run again. Keeps their saved keys, repo/URL, and screenshot gallery for convenience.
+async function resetToSetup() {
+  await sendToBackground('job:cancel');
   await chrome.storage.local.set({ repodocs_job: { status: 'idle', stage: '', result: null, error: null } });
+  currentResult = null;
+  stopTimer();
+  els.generateBtn.disabled = false;
+  els.setupError.hidden = true;
   showView('setup');
-});
-els.retryBtn.addEventListener('click', async () => {
-  await chrome.storage.local.set({ repodocs_job: { status: 'idle', stage: '', result: null, error: null } });
-  showView('setup');
-});
+}
+
+els.newJobBtn.addEventListener('click', resetToSetup);
+els.retryBtn.addEventListener('click', resetToSetup);
+els.resetBtn.addEventListener('click', resetToSetup);
 
 init();

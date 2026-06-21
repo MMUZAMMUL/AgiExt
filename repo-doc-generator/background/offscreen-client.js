@@ -9,8 +9,8 @@ export async function ensureOffscreen() {
   if (existing.length > 0) return;
   await chrome.offscreen.createDocument({
     url: OFFSCREEN_URL,
-    reasons: ['DOM_PARSER', 'BLOBS'],
-    justification: 'Rasterize/stitch images, parse HTML, and assemble the final PDF/DOCX files.',
+    reasons: ['BLOBS'],
+    justification: 'Rasterize/stitch images and assemble the final PDF/DOCX files.',
   });
 }
 

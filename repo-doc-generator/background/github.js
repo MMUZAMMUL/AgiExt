@@ -85,13 +85,41 @@ export async function findManifest(owner, repo, tree, token) {
   return null;
 }
 
-// Extracts the first plausible "live app" URL from repo metadata or README.
-export function detectLiveUrl(repoMeta, readme) {
-  if (repoMeta.homepage && /^https?:\/\//.test(repoMeta.homepage)) return repoMeta.homepage;
-  const m = readme.match(/https?:\/\/[^\s)\]"'<>]+/gi) || [];
-  const skip = /github\.com|shields\.io|img\.shields|badge|opensource\.org|w3\.org/i;
-  const found = m.find(u => !skip.test(u));
-  return found || null;
+// Picks the most report-worthy markdown docs (besides the main README) — these are where the
+// project actually explains itself, so they're far more useful than reading all the source.
+// Prioritizes well-known doc names, then any other .md, capped to keep the AI context tight.
+const DOC_PRIORITY = [
+  /(^|\/)readme[^/]*\.md$/i,        // secondary READMEs (e.g. docs/README.md, subproject READMEs)
+  /(^|\/)architecture[^/]*\.md$/i,
+  /(^|\/)overview[^/]*\.md$/i,
+  /(^|\/)usage[^/]*\.md$/i,
+  /(^|\/)getting[-_]?started[^/]*\.md$/i,
+  /(^|\/)contributing[^/]*\.md$/i,
+  /(^|\/)features?[^/]*\.md$/i,
+  /(^|\/)roadmap[^/]*\.md$/i,
+  /(^|\/)changelog[^/]*\.md$/i,
+];
+
+function rankDocPath(path) {
+  for (let i = 0; i < DOC_PRIORITY.length; i++) if (DOC_PRIORITY[i].test(path)) return i;
+  return DOC_PRIORITY.length; // any other .md
+}
+
+// Returns [{ path, excerpt }] for up to `max` markdown docs (excluding the root README, which is
+// fetched separately). Prefers shallow paths and recognized doc names.
+export async function getMarkdownDocs(owner, repo, tree, token, max = 4) {
+  const candidates = tree
+    .filter(t => t.type === 'blob' && /\.md$/i.test(t.path) && !/^readme\.md$/i.test(t.path))
+    .map(t => ({ path: t.path, depth: t.path.split('/').length, rank: rankDocPath(t.path) }))
+    .sort((a, b) => (a.rank - b.rank) || (a.depth - b.depth) || a.path.localeCompare(b.path))
+    .slice(0, max);
+
+  const docs = [];
+  for (const c of candidates) {
+    const content = await getFileContent(owner, repo, c.path, token);
+    if (content && content.trim()) docs.push({ path: c.path, excerpt: content.slice(0, 1800) });
+  }
+  return docs;
 }
 
 export async function analyzeRepository(repoInput, token, onProgress) {
@@ -111,10 +139,11 @@ export async function analyzeRepository(repoInput, token, onProgress) {
   onProgress?.('Reading README…');
   const readme = await getReadme(owner, repo, token);
 
+  onProgress?.('Reading project docs (.md files)…');
+  const docs = await getMarkdownDocs(owner, repo, tree, token).catch(() => []);
+
   onProgress?.('Detecting tech stack manifest…');
   const manifest = await findManifest(owner, repo, tree, token).catch(() => null);
 
-  const liveUrl = detectLiveUrl(meta, readme);
-
-  return { owner, repo, meta, branches, languages, tree, readme, manifest, liveUrl };
+  return { owner, repo, meta, branches, languages, tree, readme, docs, manifest };
 }

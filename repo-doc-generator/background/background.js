@@ -1,11 +1,10 @@
-// RepoDocs AI — MV3 service worker. Orchestrates: GitHub/website analysis -> AI writing ->
+// RepoDocs AI — MV3 service worker. Orchestrates: GitHub repo analysis -> AI writing ->
 // diagram rasterization (via offscreen doc) -> PDF/DOCX assembly (via offscreen doc) -> download.
 import { analyzeRepository } from './github.js';
-import { analyzeWebsite, isLikelyGithubInput } from './website.js';
-import { generateSection, hasAnyKey } from './providers.js';
+import { generateSection, hasAnyKey, testProviderKey } from './providers.js';
 import { buildStructureDiagram, buildMindmap } from './diagrams.js';
 import { ensureOffscreen, sendToOffscreen } from './offscreen-client.js';
-import { captureVisibleTab, captureFullPage, measureDataUrl, openAndCaptureUrl } from './screenshot.js';
+import { captureVisibleTab, captureFullPage, captureArea, measureDataUrl } from './screenshot.js';
 
 const JOB_KEY = 'repodocs_job';
 let cancelRequested = false;
@@ -39,38 +38,66 @@ function stopKeepalive() {
 }
 
 // ---------- AI section writing ----------
-const SECTION_SYSTEM_PROMPT = `You are a senior technical writer producing a professional documentation PDF for developers and stakeholders. Write in clear, confident, selling-but-accurate prose. No markdown headers, no code fences — short paragraphs and occasional "- " bullet lines only. Stay factual based only on the provided context; never invent features, metrics, or URLs.`;
+// Developer-facing tone: tight, scannable, bullet-driven — NOT academic prose.
+const SECTION_SYSTEM_PROMPT = `You are a senior software engineer writing a concise, professional project report for other developers. Be direct, technical, and factual based ONLY on the provided context (README and other .md docs, languages, file structure, and dependency manifest). Never invent features, numbers, URLs, or capabilities not present in the context. Style rules: NO markdown headers, NO code fences, NO bold/asterisks. Prefer short "- " bullet points over paragraphs. Keep sentences short. Be specific (name real tools, files, commands found in the context) rather than generic.`;
 
-async function writeSection(keys, label, context, onStatus) {
-  const userPrompt = `Section: ${label}\n\nContext:\n${context}\n\nWrite the "${label}" section of the documentation (120-220 words).`;
+// Per-section guidance keeps each part short and developer-oriented.
+const SECTION_GUIDE = {
+  'Project Summary': 'In 2-3 short sentences then 2-3 bullets: what this project is, who it is for, and the core problem it solves.',
+  'Tech Stack & Architecture': 'Bullet list of the languages, frameworks, and notable dependencies, and one line on how the codebase is organized.',
+  'Key Features': '4-7 bullets, each a concrete capability stated plainly.',
+  'Setup & Development Steps': 'Numbered-style "- " bullets of the steps a developer takes to install, configure, and run it, based on the README. Mention real commands/files if present.',
+  'Project Findings': '3-5 bullets of objective observations about code quality, structure, docs, testing, and maturity — only what the context supports.',
+  'Solved Gaps & Project Value': '3-5 bullets: what problems this solves, what gaps it fills, and its practical value.',
+  'Conclusion': '2-3 sentences: a balanced wrap-up and who should use it.',
+};
+
+async function writeSection(connections, label, context, onStatus) {
+  const guide = SECTION_GUIDE[label] || 'Write this section concisely.';
+  const userPrompt = `Context:\n${context}\n\nWrite ONLY the "${label}" section (about 45-110 words). ${guide}`;
   try {
-    return await generateSection(keys, SECTION_SYSTEM_PROMPT, userPrompt, onStatus);
+    return await generateSection(connections, SECTION_SYSTEM_PROMPT, userPrompt, onStatus);
   } catch (err) {
     return `(AI writing unavailable for this section: ${err.message})`;
   }
 }
 
-async function writeAllSections(keys, labels, context) {
+async function writeAllSections(connections, labels, context) {
   const sections = {};
   for (const label of labels) {
     if (cancelRequested) throw new Error('Cancelled.');
     await setStage(`Writing "${label}" (AI)…`);
-    sections[label] = await writeSection(keys, label, context, s => setStage(`${label}: ${s}`));
+    sections[label] = await writeSection(connections, label, context, s => setStage(`${label}: ${s}`));
   }
   return sections;
 }
 
 // ---------- GitHub context ----------
+// A short top-level structure outline so the AI can speak accurately about layout.
+function topLevelOutline(tree) {
+  const dirs = [...new Set(tree.filter(t => t.type === 'tree' && !t.path.includes('/')).map(t => t.path))];
+  const files = tree.filter(t => t.type === 'blob' && !t.path.includes('/')).map(t => t.path);
+  const parts = [];
+  if (dirs.length) parts.push('Top-level folders: ' + dirs.slice(0, 12).join(', '));
+  if (files.length) parts.push('Top-level files: ' + files.slice(0, 12).join(', '));
+  return parts.join('\n') || '(structure unavailable)';
+}
+
 function buildGithubContext(analysis) {
-  const { meta, languages, manifest, readme } = analysis;
+  const { meta, languages, manifest, readme, docs } = analysis;
   const langs = Object.keys(languages || {}).slice(0, 6).join(', ') || 'unknown';
+  const docExcerpts = (docs || [])
+    .map(d => `--- ${d.path} ---\n${d.excerpt}`)
+    .join('\n\n') || '(no additional .md docs found)';
   return [
     `Name: ${meta.full_name || analysis.repo}`,
     `Description: ${meta.description || '(none provided)'}`,
     `Primary languages: ${langs}`,
     `Stars: ${meta.stargazers_count ?? 'n/a'}  Forks: ${meta.forks_count ?? 'n/a'}  License: ${meta.license?.name || 'unspecified'}`,
-    manifest ? `Manifest (${manifest.file}):\n${manifest.content.slice(0, 1200)}` : 'No dependency manifest detected.',
-    `README excerpt:\n${(readme || '').slice(0, 2500)}`,
+    topLevelOutline(analysis.tree || []),
+    manifest ? `Dependency manifest (${manifest.file}):\n${manifest.content.slice(0, 1200)}` : 'No dependency manifest detected.',
+    `README:\n${(readme || '(no README found)').slice(0, 3500)}`,
+    `Other project docs (.md files):\n${docExcerpts.slice(0, 4000)}`,
   ].join('\n\n');
 }
 
@@ -81,43 +108,33 @@ function deriveGithubMindmapItems(analysis) {
   const topDirs = [...new Set(analysis.tree.filter(t => t.type === 'tree' && !t.path.includes('/')).map(t => t.path))].slice(0, 5);
   if (topDirs.length) items.push({ label: 'Project Modules', children: topDirs });
   if (analysis.manifest) items.push({ label: 'Dependencies', children: [analysis.manifest.file] });
+  if (analysis.docs?.length) items.push({ label: 'Docs', children: ['README', ...analysis.docs.slice(0, 3).map(d => d.path)] });
   if (analysis.branches?.length) items.push({ label: 'Branches', children: analysis.branches.slice(0, 4).map(b => b.name) });
-  if (analysis.liveUrl) items.push({ label: 'Live App', children: ['Deployed & reachable'] });
-  items.push({ label: 'Documentation', children: ['README', 'AI-generated breakdown'] });
   items.push({ label: 'License', children: [analysis.meta.license?.name || 'Unspecified'] });
   return items;
 }
 
-const GITHUB_SECTION_LABELS = ['Executive Overview', 'Architecture & Tech Stack', 'Features & Functionality', 'Setup & Usage', 'Testing & Quality Notes', 'Conclusion & Recommendations'];
+const GITHUB_SECTION_LABELS = [
+  'Project Summary',
+  'Tech Stack & Architecture',
+  'Key Features',
+  'Setup & Development Steps',
+  'Project Findings',
+  'Solved Gaps & Project Value',
+  'Conclusion',
+];
 
-// ---------- Website context ----------
-function buildWebsiteContext(site) {
-  return [
-    `URL: ${site.url}`,
-    `Title: ${site.title || '(none)'}`,
-    `Meta description: ${site.description || '(none)'}`,
-    `Headings: ${site.headings.join(' | ') || '(none found)'}`,
-    `Navigation links: ${site.navLinks.join(' | ') || '(none found)'}`,
-    `Visible text excerpt:\n${site.textExcerpt}`,
-  ].join('\n\n');
+// ---------- page-model (block) builders ----------
+// The document is a flat list of blocks the offscreen renderer flows onto pages:
+//   { type:'facts',  items:[[label,value],…] }
+//   { type:'section', title, text }
+//   { type:'diagram', title, image:{dataUrl,width,height}, caption }
+//   { type:'gallery', title, images:[{dataUrl,width,height,caption}] }
+function sectionBlock(title, sections) {
+  return { type: 'section', title, text: sections[title] || '' };
 }
-
-function deriveWebsiteMindmapItems(site) {
-  const items = [];
-  if (site.navLinks?.length) items.push({ label: 'Navigation', children: site.navLinks.slice(0, 6) });
-  if (site.headings?.length) items.push({ label: 'Key Sections', children: site.headings.slice(0, 6) });
-  items.push({ label: 'Documentation', children: ['AI-generated breakdown'] });
-  return items;
-}
-
-const WEBSITE_SECTION_LABELS = ['Executive Overview', 'Purpose & Audience', 'Features & Functionality', 'Content & Navigation', 'Design & UX Notes', 'Conclusion & Recommendations'];
-
-// ---------- page-model builders ----------
-function sectionPage(title, sections) {
-  return { type: 'section', title, text: sections[title] };
-}
-function imagePage(title, image, caption) {
-  return image ? { type: 'image', title, image, caption } : null;
+function diagramBlock(title, image, caption) {
+  return image ? { type: 'diagram', title, image, caption } : null;
 }
 
 async function rasterizeDiagrams(items) {
@@ -125,99 +142,72 @@ async function rasterizeDiagrams(items) {
   return sendToOffscreen('rasterize-svgs', { items });
 }
 
-function manualImagePages(manualImages) {
-  return (manualImages || []).map((m, i) => ({
-    type: 'image',
-    title: i === 0 ? 'Screenshots & Visual Reference' : 'Screenshots & Visual Reference (cont.)',
-    image: { dataUrl: m.dataUrl, width: m.width, height: m.height },
-    caption: m.caption || '',
-  }));
+function galleryBlock(manualImages) {
+  const imgs = (manualImages || []).map(m => ({ dataUrl: m.dataUrl, width: m.width, height: m.height, caption: m.caption || '' }));
+  return imgs.length ? { type: 'gallery', title: 'Screenshots & Visual Reference', images: imgs } : null;
 }
 
 // ---------- main job ----------
-async function runJob({ repoInput, keys, githubToken, captureScreenshot, manualImages }) {
+async function runJob({ repoInput, connections, githubToken, manualImages }) {
   cancelRequested = false;
   startKeepalive();
   await setJob({ status: 'running', stage: 'Starting…', result: null, error: null, startedAt: Date.now() });
 
   try {
-    if (!hasAnyKey(keys)) throw new Error('Add at least one free AI provider key in the popup before generating.');
+    if (!hasAnyKey(connections)) throw new Error('Add at least one free AI provider key in the popup before generating.');
 
-    const isGithub = isLikelyGithubInput(repoInput);
-    let cover, footerLabel, pages, fileBaseName;
+    const analysis = await analyzeRepository(repoInput, githubToken, stage => setStage(stage));
+    if (cancelRequested) throw new Error('Cancelled.');
 
-    if (isGithub) {
-      const analysis = await analyzeRepository(repoInput, githubToken, stage => setStage(stage));
-      if (cancelRequested) throw new Error('Cancelled.');
+    await setStage('Building diagrams…');
+    const diagramItems = [
+      { key: 'structure', title: 'Repository Structure', svg: buildStructureDiagram(analysis.tree, analysis.repo) },
+      { key: 'mindmap', title: 'Feature Mindmap', svg: buildMindmap(analysis.repo, deriveGithubMindmapItems(analysis)) },
+    ];
+    await ensureOffscreen();
+    const images = await rasterizeDiagrams(diagramItems);
 
-      await setStage('Building diagrams…');
-      const diagramItems = [
-        { key: 'structure', title: 'Repository Structure', svg: buildStructureDiagram(analysis.tree, analysis.repo) },
-        { key: 'mindmap', title: 'Feature Mindmap', svg: buildMindmap(analysis.repo, deriveGithubMindmapItems(analysis)) },
-      ];
-      await ensureOffscreen();
-      const images = await rasterizeDiagrams(diagramItems);
+    const context = buildGithubContext(analysis);
+    const sections = await writeAllSections(connections, GITHUB_SECTION_LABELS, context);
 
-      const context = buildGithubContext(analysis);
-      const sections = await writeAllSections(keys, GITHUB_SECTION_LABELS, context);
+    const cover = {
+      title: `${analysis.owner}/${analysis.repo}`,
+      subtitle: analysis.meta.description,
+      generatedLabel: `Developer Project Report · ${new Date().toLocaleDateString()}`,
+    };
+    const footerLabel = `RepoDocs AI · ${analysis.owner}/${analysis.repo}`;
+    const fileBaseName = analysis.repo;
 
-      let screenshot = null;
-      if (captureScreenshot && analysis.liveUrl) {
-        await setStage('Capturing live app screenshot…');
-        screenshot = await openAndCaptureUrl(analysis.liveUrl, 'fullpage', s => setStage(s));
-      }
+    const facts = [
+      ['Repository', `${analysis.owner}/${analysis.repo}`],
+      ['Languages', Object.keys(analysis.languages || {}).slice(0, 4).join(', ') || 'n/a'],
+      ['Stars', String(analysis.meta.stargazers_count ?? 'n/a')],
+      ['Forks', String(analysis.meta.forks_count ?? 'n/a')],
+      ['License', analysis.meta.license?.name || 'Unspecified'],
+      ['Default branch', analysis.meta.default_branch || 'n/a'],
+    ];
 
-      cover = { title: `${analysis.owner}/${analysis.repo}`, subtitle: analysis.meta.description, generatedLabel: `Generated by RepoDocs AI · ${new Date().toLocaleDateString()}` };
-      footerLabel = `RepoDocs AI · ${analysis.owner}/${analysis.repo}`;
-      fileBaseName = analysis.repo;
-
-      pages = [
-        sectionPage('Executive Overview', sections),
-        sectionPage('Architecture & Tech Stack', sections),
-        imagePage('Repository Structure', images.structure, 'Top-level folder & file layout (truncated for readability).'),
-        sectionPage('Features & Functionality', sections),
-        imagePage('Feature Mindmap', images.mindmap, 'Key capabilities derived from the codebase, manifest, and README.'),
-        sectionPage('Setup & Usage', sections),
-        sectionPage('Testing & Quality Notes', sections),
-        imagePage('Live Application', screenshot, 'Full-page capture of the deployed app.'),
-        ...manualImagePages(manualImages),
-        sectionPage('Conclusion & Recommendations', sections),
-      ].filter(Boolean);
-    } else {
-      const site = await analyzeWebsite(repoInput, stage => setStage(stage));
-      if (cancelRequested) throw new Error('Cancelled.');
-
-      await setStage('Building feature mindmap…');
-      const diagramItems = [{ key: 'mindmap', title: 'Site Map & Feature Mindmap', svg: buildMindmap(new URL(site.url).hostname, deriveWebsiteMindmapItems(site)) }];
-      await ensureOffscreen();
-      const images = await rasterizeDiagrams(diagramItems);
-
-      const context = buildWebsiteContext(site);
-      const sections = await writeAllSections(keys, WEBSITE_SECTION_LABELS, context);
-
-      const hostname = new URL(site.url).hostname;
-      cover = { title: hostname, subtitle: site.description || site.title, generatedLabel: `Generated by RepoDocs AI · ${new Date().toLocaleDateString()}` };
-      footerLabel = `RepoDocs AI · ${hostname}`;
-      fileBaseName = hostname;
-
-      pages = [
-        sectionPage('Executive Overview', sections),
-        sectionPage('Purpose & Audience', sections),
-        imagePage('Site Map & Feature Mindmap', images.mindmap, 'Navigation and key sections detected on the page.'),
-        sectionPage('Features & Functionality', sections),
-        sectionPage('Content & Navigation', sections),
-        sectionPage('Design & UX Notes', sections),
-        imagePage('Live Page Screenshot', site.screenshot, 'Full-page capture of the live website.'),
-        ...manualImagePages(manualImages),
-        sectionPage('Conclusion & Recommendations', sections),
-      ].filter(Boolean);
-    }
+    // Block order: a tight, summary-first layout (facts + summary + stack + features), then the
+    // diagrams, then the remaining developer findings, then the screenshot gallery.
+    const blocks = [
+      { type: 'facts', items: facts },
+      sectionBlock('Project Summary', sections),
+      sectionBlock('Tech Stack & Architecture', sections),
+      sectionBlock('Key Features', sections),
+      diagramBlock('Repository Structure', images.structure, 'Top-level folder & file layout (truncated for readability).'),
+      diagramBlock('Feature Mindmap', images.mindmap, 'Key capabilities derived from the docs, manifest, and structure.'),
+      sectionBlock('Setup & Development Steps', sections),
+      sectionBlock('Project Findings', sections),
+      sectionBlock('Solved Gaps & Project Value', sections),
+      sectionBlock('Conclusion', sections),
+      galleryBlock(manualImages),
+    ].filter(Boolean);
 
     await setStage('Assembling PDF…');
-    const pdfDataUrl = await sendToOffscreen('build-pdf', { cover, pages, footerLabel });
+    const pdfDataUrl = await sendToOffscreen('build-pdf', { cover, blocks, footerLabel });
 
     await setStage('Assembling DOCX…');
-    const docxDataUrl = await sendToOffscreen('build-docx', { cover, pages, footerLabel });
+    const docxDataUrl = await sendToOffscreen('build-docx', { cover, blocks, footerLabel });
 
     await setJob({
       status: 'done',
@@ -263,10 +253,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     });
     return true;
   }
-  if (msg.type === 'request-screenshot-permission') {
-    chrome.permissions.request({ origins: ['<all_urls>'] }, granted => sendResponse({ granted }));
-    return true;
-  }
   if (msg.type === 'capture:visible') {
     (async () => {
       try {
@@ -291,6 +277,22 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         sendResponse({ error: err.message });
       }
     })();
+    return true;
+  }
+  if (msg.type === 'capture:area') {
+    (async () => {
+      try {
+        const tab = await getActiveTab();
+        const result = await captureArea(tab.id, tab.windowId);
+        sendResponse({ result });
+      } catch (err) {
+        sendResponse({ error: err.message });
+      }
+    })();
+    return true;
+  }
+  if (msg.type === 'provider:test') {
+    testProviderKey(msg.payload.providerId, msg.payload.key).then(sendResponse);
     return true;
   }
 });
