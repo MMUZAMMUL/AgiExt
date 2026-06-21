@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>RepoDocs AI</title>
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <header class="header">
+    <img src="../icons/icon48.png" alt="" width="28" height="28" />
+    <div>
+      <h1>RepoDocs <span>AI</span></h1>
+      <p class="tagline">Repo → professional PDF/DOCX, in your browser</p>
+    </div>
+  </header>
+
+  <main id="setup-view">
+    <section class="card">
+      <h2>1. Connect a free AI provider</h2>
+      <p class="hint">Add at least one key. Keys are stored only on this device and sent only to the provider you choose.</p>
+
+      <label>Groq <a href="https://console.groq.com/keys" target="_blank" rel="noopener">get free key</a></label>
+      <input type="password" id="key-groq" placeholder="gsk_…" autocomplete="off" />
+
+      <details>
+        <summary>More providers (optional)</summary>
+        <label>Cerebras <a href="https://cloud.cerebras.ai/" target="_blank" rel="noopener">get free key</a></label>
+        <input type="password" id="key-cerebras" placeholder="csk-…" autocomplete="off" />
+        <label>Gemini <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">get free key</a></label>
+        <input type="password" id="key-gemini" placeholder="AIza…" autocomplete="off" />
+        <label>OpenRouter <a href="https://openrouter.ai/keys" target="_blank" rel="noopener">get free key</a></label>
+        <input type="password" id="key-openrouter" placeholder="sk-or-…" autocomplete="off" />
+      </details>
+    </section>
+
+    <section class="card">
+      <h2>2. Point at a repository or website</h2>
+      <label>GitHub repo URL, owner/repo, or any website URL</label>
+      <input type="text" id="repo-input" placeholder="https://github.com/owner/repo  or  https://example.com" />
+
+      <details>
+        <summary>Advanced (optional)</summary>
+        <label>GitHub personal access token <span class="hint-inline">— raises the API rate limit, avoids "rate limit hit" errors on large repos</span></label>
+        <input type="password" id="github-token" placeholder="ghp_… (optional)" autocomplete="off" />
+        <label class="checkbox-row">
+          <input type="checkbox" id="capture-screenshot" />
+          Try to capture a screenshot of the live app (if one is linked in the repo)
+        </label>
+      </details>
+    </section>
+
+    <section class="card">
+      <h2>3. Screenshots & images <span class="hint-inline">(optional — manual or auto)</span></h2>
+      <p class="hint">Capture or upload images to include as a "Screenshots & Visual Reference" section in the generated document.</p>
+      <div class="capture-row">
+        <button type="button" id="capture-visible-btn" class="chip-btn">📷 Visible tab</button>
+        <button type="button" id="capture-fullpage-btn" class="chip-btn">📜 Full page</button>
+        <button type="button" id="capture-window-btn" class="chip-btn">🖥️ Window/Screen</button>
+        <button type="button" id="upload-images-btn" class="chip-btn">⬆️ Upload</button>
+      </div>
+      <input type="file" id="upload-images-input" accept="image/*" multiple hidden />
+      <p id="capture-status" class="hint-inline" hidden></p>
+      <div id="gallery" class="gallery"></div>
+    </section>
+
+    <button id="generate-btn" class="primary-btn">Generate Documentation</button>
+    <p id="setup-error" class="error-text" hidden></p>
+  </main>
+
+  <main id="progress-view" hidden>
+    <section class="card">
+      <h2>Analyzing <span id="progress-repo"></span></h2>
+      <div class="progress-row">
+        <div class="spinner"></div>
+        <div>
+          <p id="progress-stage">Starting…</p>
+          <p class="timer" id="progress-timer">0:00</p>
+        </div>
+      </div>
+      <button id="cancel-btn" class="secondary-btn">Cancel</button>
+    </section>
+  </main>
+
+  <main id="done-view" hidden>
+    <section class="card">
+      <h2>Documentation ready 🎉</h2>
+      <p class="hint" id="done-repo"></p>
+      <button id="download-pdf-btn" class="primary-btn">Download PDF</button>
+      <button id="download-docx-btn" class="primary-btn secondary-btn">Download DOCX</button>
+      <button id="new-job-btn" class="link-btn">Analyze another repo</button>
+    </section>
+  </main>
+
+  <main id="error-view" hidden>
+    <section class="card">
+      <h2>Something went wrong</h2>
+      <p class="error-text" id="error-message"></p>
+      <button id="retry-btn" class="primary-btn">Try again</button>
+    </section>
+  </main>
+
+  <script src="popup.js"></script>
+</body>
+</html>
