@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>RepoDocs AI — Screenshot Editor</title>
+  <link rel="stylesheet" href="editor.css" />
+</head>
+<body>
+  <header class="toolbar">
+    <span class="brand">RepoDocs <span>AI</span> · Edit screenshot</span>
+
+    <div class="tools" id="tools">
+      <button class="tool active" data-tool="pointer" title="Move / no draw">🖱️</button>
+      <button class="tool" data-tool="rect" title="Rectangle">▭</button>
+      <button class="tool" data-tool="ellipse" title="Circle / ellipse">◯</button>
+      <button class="tool" data-tool="arrow" title="Arrow">↗</button>
+      <button class="tool" data-tool="line" title="Line">／</button>
+      <button class="tool" data-tool="pen" title="Free draw">✏️</button>
+      <button class="tool" data-tool="text" title="Text">T</button>
+    </div>
+
+    <div class="colors" id="colors"></div>
+
+    <label class="width-ctl">Width
+      <input type="range" id="width" min="1" max="20" value="4" />
+    </label>
+
+    <div class="history">
+      <button id="undo" title="Undo">↶ Undo</button>
+      <button id="redo" title="Redo">↷ Redo</button>
+      <button id="clear" title="Remove all annotations">✖ Clear</button>
+    </div>
+
+    <div class="actions">
+      <button id="copy" class="ghost" title="Copy to clipboard">📋 Copy</button>
+      <button id="save" class="ghost" title="Save PNG to disk">⬇️ Save</button>
+      <button id="cancel" class="ghost" title="Discard">Cancel</button>
+      <button id="done" class="primary" title="Add to the document gallery">✓ Done</button>
+    </div>
+  </header>
+
+  <main class="stage">
+    <div class="canvas-wrap" id="canvas-wrap">
+      <canvas id="canvas"></canvas>
+      <input type="text" id="text-input" class="text-input" hidden />
+    </div>
+    <p id="status" class="status"></p>
+  </main>
+
+  <script src="editor.js"></script>
+</body>
+</html>
