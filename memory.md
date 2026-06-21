@@ -131,6 +131,13 @@ desktopCapture` + host perms for GitHub/raw + the 4 AI providers. `<all_urls>` i
 
 ## 5. Changelog / decision log
 
+- **2026-06-21** — UX: added a global **↻ Reset** button in the popup header (always visible)
+  that cancels any in-flight job, clears the result/error, and returns to the setup screen so
+  the user can run again — while keeping their saved keys, repo/URL, and screenshot gallery.
+  Reused the same `resetToSetup()` for the done-screen "Start a new document" and the
+  error-screen "Try again". Relabeled the two done-screen downloads to "⬇️ Download PDF file"
+  and "⬇️ Download Word file (.docx)" for clarity. Files: `popup/popup.html`, `popup/popup.css`,
+  `popup/popup.js`.
 - **2026-06-21** — **Removed the automatic live-app / website screenshot feature** from
   RepoDocs AI. Even after the `await` fix, opening a throwaway tab to screenshot a live URL
   was still the source of "Something went wrong / No tab with id …" on Generate, and it isn't

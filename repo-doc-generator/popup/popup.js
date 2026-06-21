@@ -38,6 +38,8 @@ const els = {
 
   errorMessage: document.getElementById('error-message'),
   retryBtn: document.getElementById('retry-btn'),
+
+  resetBtn: document.getElementById('reset-btn'),
 };
 
 let timerInterval = null;
@@ -410,13 +412,20 @@ els.downloadDocxBtn.addEventListener('click', () => {
   sendToBackground('download', { url: currentResult.docxDataUrl, filename: `${currentResult.repoName}-documentation.docx` });
 });
 
-els.newJobBtn.addEventListener('click', async () => {
+// Cancels any in-flight job, clears the result/error, and returns to the setup screen so the
+// user can run again. Keeps their saved keys, repo/URL, and screenshot gallery for convenience.
+async function resetToSetup() {
+  await sendToBackground('job:cancel');
   await chrome.storage.local.set({ repodocs_job: { status: 'idle', stage: '', result: null, error: null } });
+  currentResult = null;
+  stopTimer();
+  els.generateBtn.disabled = false;
+  els.setupError.hidden = true;
   showView('setup');
-});
-els.retryBtn.addEventListener('click', async () => {
-  await chrome.storage.local.set({ repodocs_job: { status: 'idle', stage: '', result: null, error: null } });
-  showView('setup');
-});
+}
+
+els.newJobBtn.addEventListener('click', resetToSetup);
+els.retryBtn.addEventListener('click', resetToSetup);
+els.resetBtn.addEventListener('click', resetToSetup);
 
 init();
