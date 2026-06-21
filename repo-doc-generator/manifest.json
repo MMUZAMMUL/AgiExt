@@ -39,8 +39,5 @@
     "https://generativelanguage.googleapis.com/*",
     "https://openrouter.ai/*"
   ],
-  "optional_host_permissions": [
-    "<all_urls>"
-  ],
   "minimum_chrome_version": "116"
 }

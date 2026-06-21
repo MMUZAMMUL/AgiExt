@@ -377,7 +377,7 @@ els.generateBtn.addEventListener('click', async () => {
     return;
   }
   if (!settings.repoInput) {
-    els.setupError.textContent = 'Enter a GitHub repository URL, owner/repo, or website URL.';
+    els.setupError.textContent = 'Enter a GitHub repository URL or owner/repo.';
     els.setupError.hidden = false;
     return;
   }
