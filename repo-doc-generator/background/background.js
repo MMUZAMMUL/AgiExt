@@ -1,10 +1,10 @@
 // RepoDocs AI — MV3 service worker. Orchestrates: GitHub repo analysis -> AI writing ->
 // diagram rasterization (via offscreen doc) -> PDF/DOCX assembly (via offscreen doc) -> download.
 import { analyzeRepository } from './github.js';
-import { generateSection, hasAnyKey } from './providers.js';
+import { generateSection, hasAnyKey, testProviderKey } from './providers.js';
 import { buildStructureDiagram, buildMindmap } from './diagrams.js';
 import { ensureOffscreen, sendToOffscreen } from './offscreen-client.js';
-import { captureVisibleTab, captureFullPage, measureDataUrl } from './screenshot.js';
+import { captureVisibleTab, captureFullPage, captureArea, measureDataUrl } from './screenshot.js';
 
 const JOB_KEY = 'repodocs_job';
 let cancelRequested = false;
@@ -52,22 +52,22 @@ const SECTION_GUIDE = {
   'Conclusion': '2-3 sentences: a balanced wrap-up and who should use it.',
 };
 
-async function writeSection(keys, label, context, onStatus) {
+async function writeSection(connections, label, context, onStatus) {
   const guide = SECTION_GUIDE[label] || 'Write this section concisely.';
   const userPrompt = `Context:\n${context}\n\nWrite ONLY the "${label}" section (about 45-110 words). ${guide}`;
   try {
-    return await generateSection(keys, SECTION_SYSTEM_PROMPT, userPrompt, onStatus);
+    return await generateSection(connections, SECTION_SYSTEM_PROMPT, userPrompt, onStatus);
   } catch (err) {
     return `(AI writing unavailable for this section: ${err.message})`;
   }
 }
 
-async function writeAllSections(keys, labels, context) {
+async function writeAllSections(connections, labels, context) {
   const sections = {};
   for (const label of labels) {
     if (cancelRequested) throw new Error('Cancelled.');
     await setStage(`Writing "${label}" (AI)…`);
-    sections[label] = await writeSection(keys, label, context, s => setStage(`${label}: ${s}`));
+    sections[label] = await writeSection(connections, label, context, s => setStage(`${label}: ${s}`));
   }
   return sections;
 }
@@ -148,13 +148,13 @@ function galleryBlock(manualImages) {
 }
 
 // ---------- main job ----------
-async function runJob({ repoInput, keys, githubToken, manualImages }) {
+async function runJob({ repoInput, connections, githubToken, manualImages }) {
   cancelRequested = false;
   startKeepalive();
   await setJob({ status: 'running', stage: 'Starting…', result: null, error: null, startedAt: Date.now() });
 
   try {
-    if (!hasAnyKey(keys)) throw new Error('Add at least one free AI provider key in the popup before generating.');
+    if (!hasAnyKey(connections)) throw new Error('Add at least one free AI provider key in the popup before generating.');
 
     const analysis = await analyzeRepository(repoInput, githubToken, stage => setStage(stage));
     if (cancelRequested) throw new Error('Cancelled.');
@@ -168,7 +168,7 @@ async function runJob({ repoInput, keys, githubToken, manualImages }) {
     const images = await rasterizeDiagrams(diagramItems);
 
     const context = buildGithubContext(analysis);
-    const sections = await writeAllSections(keys, GITHUB_SECTION_LABELS, context);
+    const sections = await writeAllSections(connections, GITHUB_SECTION_LABELS, context);
 
     const cover = {
       title: `${analysis.owner}/${analysis.repo}`,
@@ -277,6 +277,22 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         sendResponse({ error: err.message });
       }
     })();
+    return true;
+  }
+  if (msg.type === 'capture:area') {
+    (async () => {
+      try {
+        const tab = await getActiveTab();
+        const result = await captureArea(tab.id, tab.windowId);
+        sendResponse({ result });
+      } catch (err) {
+        sendResponse({ error: err.message });
+      }
+    })();
+    return true;
+  }
+  if (msg.type === 'provider:test') {
+    testProviderKey(msg.payload.providerId, msg.payload.key).then(sendResponse);
     return true;
   }
 });

@@ -37,7 +37,23 @@
     "https://api.groq.com/*",
     "https://api.cerebras.ai/*",
     "https://generativelanguage.googleapis.com/*",
-    "https://openrouter.ai/*"
+    "https://openrouter.ai/*",
+    "https://integrate.api.nvidia.com/*",
+    "https://api.together.xyz/*",
+    "https://api.sambanova.ai/*",
+    "https://router.huggingface.co/*",
+    "https://api.ai21.com/*",
+    "https://api.cohere.ai/*",
+    "https://api.deepseek.com/*",
+    "https://api.fireworks.ai/*",
+    "https://api.mistral.ai/*",
+    "https://api.x.ai/*",
+    "https://api.openai.com/*",
+    "https://api.anthropic.com/*",
+    "https://api.perplexity.ai/*",
+    "https://api.novita.ai/*",
+    "https://api.replicate.com/*",
+    "https://*.lepton.run/*"
   ],
   "minimum_chrome_version": "116"
 }

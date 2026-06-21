@@ -26,7 +26,10 @@ server.
 
 ## Get a free AI provider key
 
-You only need **one**:
+You only need **one**. The popup ships with a dropdown of ~20 providers — free and paid — plus
+an **auto-detect** mode: paste a key, click **Detect**, and the extension figures out which
+provider it belongs to (from the key's format), tests it, and turns the status dot **green**
+when it connects. A few of the free options:
 
 | Provider | Free tier | Get a key |
 |---|---|---|
@@ -34,14 +37,19 @@ You only need **one**:
 | Cerebras | Yes | https://cloud.cerebras.ai/ |
 | Google Gemini | Yes | https://aistudio.google.com/apikey |
 | OpenRouter | Free models available | https://openrouter.ai/keys |
+| Nvidia NIM | Free credits | https://build.nvidia.com/ |
+| Together / SambaNova / Hugging Face / AI21 / Cohere | Free tiers | (see the dropdown) |
 
-Paste it into the popup's "Connect a free AI provider" section. The key is stored only in
-`chrome.storage.local` on your machine and is sent only to that provider's own API — never to
-any third-party server.
+Paid providers (DeepSeek, OpenAI, Anthropic, Mistral, xAI/Grok, Fireworks, Perplexity, and
+more) are in the same dropdown. Add as many as you like with **+ Add provider** — they form a
+failover chain (if one is busy/rate-limited the next is tried), and **↻ Reset** clears them.
+Keys are stored only in `chrome.storage.local` on your machine and are sent only to that
+provider's own API — never to any third-party server.
 
 ## Using it
 
-1. Add a provider key.
+1. Add a provider key: pick a provider (or leave it on "Auto-detect"), paste your key, and click
+   **Detect** until the dot turns green.
 2. Under "Point at a GitHub repository," paste a GitHub repo URL or `owner/repo` shorthand.
 3. (Optional) Add a GitHub personal access token if you're documenting a large repo — this
    raises GitHub's API rate limit from 60 to 5,000 requests/hour and avoids rate-limit errors.
@@ -63,6 +71,8 @@ The "Screenshots & images" card lets you add pictures that get embedded in a "Sc
 Visual Reference" section of the generated document:
 
 - **📷 Visible tab** — captures exactly what's visible in your current browser tab.
+- **✂️ Select area** — dims the page and lets you drag a rectangle over any region; only that
+  region is captured and added to the gallery (press Esc to cancel).
 - **📜 Full page** — scrolls the current tab from top to bottom and stitches the slices into
   one tall image, capturing the entire page even if it's longer than your screen.
 - **🖥️ Window/Screen** — opens Chrome's native picker (`chrome.desktopCapture`) so you can
@@ -85,9 +95,10 @@ item or it's bundled into a finished document.
 - `background/diagrams.js` — builds SVG diagrams: a folder/file structure tree and a radial
   feature mindmap derived from the detected languages, top-level modules, docs, branches, and
   manifest.
-- `background/providers.js` — sends the gathered context to your chosen AI provider (with
-  automatic failover across Groq → Cerebras → Gemini → OpenRouter if you've added more than
-  one key) to write each report section in a concise, developer-facing tone.
+- `background/providers.js` — a catalog of ~20 AI providers (free + paid; most OpenAI-compatible,
+  Anthropic handled as a special case), key-format auto-detection, a `testProviderKey` health
+  check for the popup's green "connected" status, and an automatic failover chain across every
+  configured key/model to write each report section in a concise, developer-facing tone.
 - `offscreen/` — an MV3 offscreen document (the only context with a real DOM available to a
   service worker) rasterizes SVG diagrams to PNG, stitches full-page screenshot slices, and
   assembles the final PDF (via vendored `jsPDF`) and DOCX (via vendored `docx.js`) from a

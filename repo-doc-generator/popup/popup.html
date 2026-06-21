@@ -17,21 +17,15 @@
 
   <main id="setup-view">
     <section class="card">
-      <h2>1. Connect a free AI provider</h2>
-      <p class="hint">Add at least one key. Keys are stored only on this device and sent only to the provider you choose.</p>
-
-      <label>Groq <a href="https://console.groq.com/keys" target="_blank" rel="noopener">get free key</a></label>
-      <input type="password" id="key-groq" placeholder="gsk_…" autocomplete="off" />
-
-      <details>
-        <summary>More providers (optional)</summary>
-        <label>Cerebras <a href="https://cloud.cerebras.ai/" target="_blank" rel="noopener">get free key</a></label>
-        <input type="password" id="key-cerebras" placeholder="csk-…" autocomplete="off" />
-        <label>Gemini <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">get free key</a></label>
-        <input type="password" id="key-gemini" placeholder="AIza…" autocomplete="off" />
-        <label>OpenRouter <a href="https://openrouter.ai/keys" target="_blank" rel="noopener">get free key</a></label>
-        <input type="password" id="key-openrouter" placeholder="sk-or-…" autocomplete="off" />
-      </details>
+      <h2>1. Connect AI providers</h2>
+      <p class="hint">Pick a provider (or leave it on "Auto-detect" and paste a key), then click Detect — it
+        identifies the provider from the key's format, tests it, and turns green when connected. Keys are
+        stored only on this device.</p>
+      <div id="connections"></div>
+      <div class="conn-actions">
+        <button type="button" id="add-connection-btn" class="chip-btn">+ Add provider</button>
+        <button type="button" id="reset-connections-btn" class="chip-btn">↻ Reset</button>
+      </div>
     </section>
 
     <section class="card">
@@ -51,6 +45,7 @@
       <p class="hint">Capture or upload images to include as a "Screenshots & Visual Reference" section in the generated document.</p>
       <div class="capture-row">
         <button type="button" id="capture-visible-btn" class="chip-btn">📷 Visible tab</button>
+        <button type="button" id="capture-area-btn" class="chip-btn">✂️ Select area</button>
         <button type="button" id="capture-fullpage-btn" class="chip-btn">📜 Full page</button>
         <button type="button" id="capture-window-btn" class="chip-btn">🖥️ Window/Screen</button>
         <button type="button" id="upload-images-btn" class="chip-btn">⬆️ Upload</button>
@@ -96,6 +91,6 @@
     </section>
   </main>
 
-  <script src="popup.js"></script>
+  <script type="module" src="popup.js"></script>
 </body>
 </html>

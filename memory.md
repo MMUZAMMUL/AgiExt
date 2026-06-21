@@ -38,12 +38,12 @@ AgiExt/
 AgiExt (MV3 extension monorepo)
 │
 ├── repo-doc-generator  ── "RepoDocs AI"
-│     ├── INPUT: a GitHub repo (URL / owner/repo) OR any website URL
-│     ├── ANALYZE: GitHub REST API  |  website HTML fetch + DOMParser
-│     ├── WRITE:   multi-provider AI (Groq → Cerebras → Gemini → OpenRouter failover)
+│     ├── INPUT: a GitHub repo (URL / owner/repo)  [GitHub-only by design]
+│     ├── ANALYZE: GitHub REST API (README + .md docs first)
+│     ├── WRITE:   ~20-provider AI catalog w/ auto-detect + failover chain
 │     ├── DRAW:    SVG structure tree + radial feature mindmap
-│     ├── CAPTURE: visible tab / full-page stitch / window-screen / live-app screenshot
-│     └── OUTPUT:  client-side PDF (jsPDF) + DOCX (docx.js)
+│     ├── CAPTURE: visible tab / select-area crop / full-page stitch / window-screen / upload
+│     └── OUTPUT:  client-side PDF (jsPDF) + DOCX (docx.js), flowing blocks + 2-up grid
 │
 └── (future extension folders…)
 ```
@@ -82,9 +82,10 @@ popup/  (UI, user gesture context)
 background/  (MV3 service worker, ES module — NO DOM)
   background.js        orchestrator: analyze → write → diagram → assemble (blocks) → store result
   github.js            GitHub REST: meta, branches, languages, tree, README, .md docs, manifest
-  providers.js         AI failover cascade across Groq/Cerebras/Gemini/OpenRouter
+  providers.js         ~20-provider catalog (PROVIDER_CATALOG), key auto-detect, testProviderKey,
+                       connections[]→engine-chain failover (OpenAI-compat + Anthropic special case)
   diagrams.js          pure-string SVG builders (structure tree + radial mindmap)
-  screenshot.js        captureVisibleTab / captureFullPage (scroll+stitch) for the gallery
+  screenshot.js        captureVisibleTab / captureArea (drag-select crop) / captureFullPage (stitch)
   offscreen-client.js  ensureOffscreen() + sendToOffscreen() message helpers
   │  (service worker has no DOM/canvas → delegates to ↓)
   ▼
@@ -117,8 +118,9 @@ channel open for `sendResponse`.
 
 #### Permissions of note
 `storage, unlimitedStorage, downloads, offscreen, alarms, tabs, activeTab, scripting,
-desktopCapture` + host perms for GitHub/raw + the 4 AI providers. `<all_urls>` is **optional**
-(requested only when capturing a live-app / website screenshot).
+desktopCapture` + host perms for GitHub/raw + every provider API host in `PROVIDER_CATALOG`
+(~20). No `<all_urls>` — the live-app screenshot was removed. Select-area capture uses the
+existing `activeTab`/`scripting` perms (it injects an overlay into the current tab).
 
 #### Known gotchas / fragile spots
 - **No auto live-app/website screenshot** — that feature was removed (it opened a throwaway
@@ -144,6 +146,34 @@ desktopCapture` + host perms for GitHub/raw + the 4 AI providers. `<all_urls>` i
 
 ## 5. Changelog / decision log
 
+- **2026-06-21** — **Provider overhaul + custom-area screenshot + connection status.**
+  - **~20 AI providers via a catalog** (`providers.js` `PROVIDER_CATALOG`): Groq, Cerebras,
+    Gemini, OpenRouter, Nvidia NIM, Together, SambaNova, Hugging Face, AI21, Cohere (free) +
+    DeepSeek, Fireworks, Mistral, xAI/Grok, OpenAI, Anthropic, Perplexity, Novita, Replicate,
+    Lepton (paid). Most are OpenAI-compatible `/chat/completions`; **Anthropic** uses its own
+    `/v1/messages` shape (handled by `authStyle:'anthropic'` in `callEngine`). Added each host
+    to `manifest.json` `host_permissions`.
+  - **Key model changed** from a fixed `keys:{groq,cerebras,gemini,openrouter}` object to a
+    `connections:[{providerId,key}]` array threaded through `background.js` `runJob` →
+    `writeAllSections`/`writeSection` → `generateSection`/`hasAnyKey`. `buildEngineChain` now
+    iterates connections × that provider's models for failover.
+  - **Auto-detect + green status:** `detectProviderFromKey(key)` matches a key against each
+    provider's `keyPrefix` regex (e.g. `gsk_`→Groq, `csk-`→Cerebras, `AIza`→Gemini, `sk-or-`→
+    OpenRouter, `nvapi-`→Nvidia, `sk-ant-`→Anthropic, `hf_`, `xai-`, `pplx-`, `fw_`, `r8_`,
+    `sk-proj-`). `testProviderKey(providerId,key)` does a tiny live request; the popup's
+    **Detect** button flips a per-connection status dot idle→testing→green/red. New background
+    message `provider:test`. Popup section 1 is now a dynamic list of connection rows (provider
+    `<select>` grouped Free/Paid + "Auto-detect", password input, Detect, remove) with
+    **+ Add provider** and a section-local **↻ Reset**. `popup.js` is now `type="module"` and
+    imports `PROVIDER_CATALOG`/`detectProviderFromKey` from `providers.js`.
+  - **Custom-area screenshot:** new `✂️ Select area` gallery button → background `capture:area`
+    → `screenshot.js` `captureArea()` injects `selectAreaOverlay()` (dim overlay + drag-rect,
+    Esc to cancel) via `chrome.scripting`, captures the visible tab, then offscreen `crop`
+    (`cropToRect`, DPR-aware) returns just the selected region.
+  - **PDF quality note:** the user's complaint PDF was an *old* pre-redesign build (one section
+    per page, `**` literals, one screenshot per page). The shipped redesign (flowing blocks,
+    bullet/`**` stripping, two-up screenshot grid) already addresses it — pending the user
+    re-testing the new build. No further layout change made this round.
 - **2026-06-21** — **Major redesign → focused GitHub developer-report tool.**
   - **GitHub-only:** deleted `background/website.js`, removed website mode / `isLikelyGithubInput`
     / `analyzeWebsite` / `parse-html` / `detectLiveUrl`+`liveUrl`, and dropped the

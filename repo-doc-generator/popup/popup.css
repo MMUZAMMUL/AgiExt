@@ -86,6 +86,52 @@ summary {
   padding: 4px 0;
 }
 
+#connections { display: flex; flex-direction: column; gap: 8px; }
+.conn-row {
+  background: var(--bg3);
+  border: 1px solid #2a3245;
+  border-radius: 8px;
+  padding: 8px;
+}
+.conn-row-top { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
+.conn-select {
+  flex: 1;
+  background: var(--bg2);
+  border: 1px solid #2a3245;
+  border-radius: 6px;
+  padding: 6px 8px;
+  color: var(--text);
+  font-size: 11.5px;
+}
+.conn-row-bottom { display: flex; gap: 6px; }
+.conn-key {
+  flex: 1;
+  background: var(--bg2);
+  border: 1px solid #2a3245;
+  border-radius: 6px;
+  padding: 6px 8px;
+  color: var(--text);
+  font-size: 12px;
+}
+.detect-btn { flex: 0 0 auto; padding: 6px 10px; font-size: 11px; }
+.conn-status { display: flex; align-items: center; gap: 6px; margin-top: 6px; }
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #4b5563;
+  flex-shrink: 0;
+}
+.status-dot.status-green { background: #22c55e; box-shadow: 0 0 4px #22c55e; }
+.status-dot.status-yellow { background: #fbbf24; animation: pulse 1s infinite; }
+.status-dot.status-red { background: #f87171; }
+.status-text { font-size: 10.5px; color: var(--text2); }
+.status-text.status-green { color: #4ade80; }
+.status-text.status-red { color: #f87171; }
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+.conn-actions { display: flex; gap: 6px; margin-top: 8px; }
+.conn-actions .chip-btn { flex: 1; }
+
 .checkbox-row {
   display: flex;
   align-items: center;

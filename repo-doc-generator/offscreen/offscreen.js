@@ -61,6 +61,22 @@ async function stitchSlices({ slices, viewportWidth, viewportHeight, scrollHeigh
   return { dataUrl: canvas.toDataURL('image/png'), width: canvasW, height: canvasH };
 }
 
+// Crops a captured visible-tab screenshot to a CSS-pixel rect (scaled by the page's devicePixelRatio).
+async function cropToRect({ dataUrl, rect }) {
+  const img = await loadImage(dataUrl);
+  const dpr = rect.dpr || 1;
+  const sx = Math.round(rect.x * dpr);
+  const sy = Math.round(rect.y * dpr);
+  const sw = Math.round(rect.width * dpr);
+  const sh = Math.round(rect.height * dpr);
+  const canvas = document.createElement('canvas');
+  canvas.width = sw;
+  canvas.height = sh;
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh);
+  return { dataUrl: canvas.toDataURL('image/png'), width: sw, height: sh };
+}
+
 function dataUrlToUint8Array(dataUrl) {
   const base64 = dataUrl.split(',')[1];
   const binary = atob(base64);
@@ -370,6 +386,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         sendResponse({ result });
       } else if (msg.type === 'stitch') {
         const result = await stitchSlices(msg.payload);
+        sendResponse({ result });
+      } else if (msg.type === 'crop') {
+        const result = await cropToRect(msg.payload);
         sendResponse({ result });
       } else if (msg.type === 'build-pdf') {
         const result = buildPdf(msg.payload);
