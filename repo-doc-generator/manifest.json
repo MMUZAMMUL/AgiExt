@@ -55,5 +55,11 @@
     "https://api.replicate.com/*",
     "https://*.lepton.run/*"
   ],
+  "web_accessible_resources": [
+    {
+      "resources": ["popup/popup.html"],
+      "matches": ["<all_urls>"]
+    }
+  ],
   "minimum_chrome_version": "116"
 }
