@@ -18,8 +18,13 @@ server.
 1. Open `chrome://extensions` (or `edge://extensions`, `brave://extensions`).
 2. Enable **Developer mode** (top-right toggle).
 3. Click **Load unpacked** and select this folder (`extensions/repo-doc-generator`).
-4. Pin the extension and click its icon to open the **side panel** (it stays open while you work,
-   including while a report is generating — unlike a popup, it won't close when you click the page).
+4. Open a normal website tab (e.g. a GitHub repo), then click the extension's icon. The UI appears
+   as a **floating panel laid over the page** (top-right, draggable by its title bar). It stays
+   open while you work — including while a report is generating — and only closes when you click
+   its **✕** button; clicking elsewhere on the page leaves it open. Because it's an overlay (not a
+   side panel), it doesn't dock into the browser frame or shrink the page's viewport, so it won't
+   break capture/layout on sites like GitHub. The panel hides itself automatically for the instant
+   a screenshot is taken, so it never appears in your captures.
 
 > Firefox: Manifest V3 service workers and the `chrome.offscreen` API used here are Chromium-specific.
 > A Firefox build would need a background page instead of a service worker and a different
@@ -60,7 +65,7 @@ provider's own API — never to any third-party server.
    finished PDF/DOCX automatically saved into `Downloads/<that folder>/`.
 6. Click **Generate Documentation**. A progress view shows the current stage and an elapsed timer.
    When it finishes you also get a **desktop notification** ("Documentation ready ✓") even if the
-   side panel is closed or minimized.
+   window is closed or minimized.
 7. When done, click **⬇️ Download PDF file** and/or **⬇️ Download Word file (.docx)**.
 
 Use the **↻ Reset** button in the header at any time to cancel and start a new document (your
@@ -114,15 +119,21 @@ item or it's bundled into a finished document.
   assembles the final PDF (via vendored `jsPDF`) and DOCX (via vendored `docx.js`) from a
   flowing list of content **blocks** (`facts` / `section` / `diagram` / `gallery`) — entirely
   in-browser. Sections flow onto pages and screenshots render in a two-up grid.
-- `popup/` — the UI, loaded as a **side panel** (so it stays open while you work and while a
-  report generates, instead of closing the instant you click the page): provider connections with
-  detect/green-status, repo input, the screenshot/upload gallery, auto-save settings, a header
-  **↻ Reset**, live progress, and the two download buttons. Job and gallery state are persisted to
-  `chrome.storage.local` so they survive reopening, and the gallery live-syncs (via
-  `chrome.storage.onChanged`) when the annotation editor adds an image. Window/Screen capture and
-  clipboard-copy run directly in the panel's own DOM (rather than the background service worker),
-  since `getUserMedia`/`<video>`/`<canvas>` and the Clipboard API need a real page context tied to
-  a user gesture.
+- `popup/` — the UI, injected as a **floating overlay panel over the current page** rather than
+  the default action popup (closes the instant you click the page) or a side panel (docks into the
+  browser frame and shrinks the page's viewport, breaking capture/layout on some sites). On the
+  toolbar-icon click the background runs `chrome.scripting.executeScript` to add a fixed-position,
+  Shadow-DOM-isolated host element containing an `<iframe>` of `popup/popup.html` (declared in
+  `web_accessible_resources`); a second click toggles it off, and its **✕** closes it (clicking the
+  page does not). Contents: provider connections with detect/green-status, repo input, the
+  screenshot/upload gallery, auto-save settings, a header **↻ Reset**, live progress, and the two
+  download buttons. Job and gallery state are persisted to `chrome.storage.local` so they survive
+  reopening, and the gallery live-syncs (via `chrome.storage.onChanged`) when the annotation editor
+  adds an image. Because the panel is part of the page's DOM, the background hides it
+  (`visibility:hidden`) for the moment of each capture so it never shows up in screenshots.
+  Window/Screen capture and clipboard-copy run directly in the iframe's own DOM (rather than the
+  background service worker), since `getUserMedia`/`<video>`/`<canvas>` and the Clipboard API need
+  a real page context tied to a user gesture.
 - Auto-save (optional) writes captures and the finished report into a `Downloads/<folder>`
   subfolder, and a desktop notification fires when generation completes.
 
@@ -131,6 +142,8 @@ item or it's bundled into a finished document.
 - Very large repositories (tens of thousands of files) will produce a truncated structure
   diagram and may need a GitHub token to avoid rate limiting.
 - GitHub-only: arbitrary website URLs are intentionally not supported.
+- The overlay panel can't open on browser-internal pages (`chrome://…`, the Web Store, the PDF
+  viewer, etc.) because extensions can't inject into them — open a normal website tab first.
 - There is no automatic live-app screenshot — add screenshots manually via the
   "Screenshots & images" gallery.
 - Report quality depends on the repo's docs: projects with a thin or missing `README.md` and no

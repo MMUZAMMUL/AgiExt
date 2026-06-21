@@ -12,7 +12,8 @@
 * { box-sizing: border-box; }
 
 body {
-  width: 360px;
+  width: 100%;
+  min-height: 100vh;
   margin: 0;
   background: var(--bg);
   color: var(--text);

@@ -11,8 +11,98 @@ const SETTINGS_KEY = 'repodocs_settings';
 const PENDING_CROP_KEY = 'repodocs_pending_crop';
 let cancelRequested = false;
 
-// Open the side panel when the toolbar icon is clicked (instead of a popup that closes on blur).
-chrome.sidePanel?.setPanelBehavior?.({ openPanelOnActionClick: true }).catch(() => {});
+const OVERLAY_HOST_ID = '__repodocs_overlay_host__';
+
+// The UI is injected as a FLOATING OVERLAY on top of the current page (not the default action
+// popup, which closes the instant you click the page; not a side panel, which docks into the
+// browser frame and shrinks the page's viewport — breaking capture/layout on sites like GitHub).
+// The overlay is just a DOM element positioned over the real page, so it doesn't reflow the page
+// and only closes via its own ✕ button — clicking elsewhere on the page leaves it open.
+// This function is stringified and injected into the page, so it can't reference outer scope.
+function injectOverlay(iframeUrl) {
+  const ID = '__repodocs_overlay_host__';
+  const existing = document.getElementById(ID);
+  if (existing) { existing.remove(); return; } // toggle off if already open
+
+  const host = document.createElement('div');
+  host.id = ID;
+  host.style.cssText = 'all:initial; position:fixed; top:16px; right:16px; width:400px; height:640px; max-height:calc(100vh - 32px); z-index:2147483647;';
+  const shadow = host.attachShadow({ mode: 'open' });
+
+  const wrap = document.createElement('div');
+  wrap.style.cssText = 'position:relative; width:100%; height:100%; border-radius:12px; overflow:hidden; box-shadow:0 12px 48px rgba(0,0,0,.55); background:#0f1117; font-family:Segoe UI,Arial,sans-serif;';
+
+  const bar = document.createElement('div');
+  bar.style.cssText = 'position:absolute; top:0; left:0; right:0; height:30px; display:flex; align-items:center; justify-content:space-between; padding:0 6px 0 10px; background:#161b27; cursor:move; z-index:2; user-select:none;';
+  const label = document.createElement('span');
+  label.textContent = 'RepoDocs AI';
+  label.style.cssText = 'color:#94a3b8; font-size:11px; letter-spacing:.3px;';
+  const close = document.createElement('button');
+  close.textContent = '✕';
+  close.title = 'Close';
+  close.style.cssText = 'border:0; background:transparent; color:#94a3b8; font-size:14px; line-height:1; cursor:pointer; padding:4px 7px; border-radius:5px;';
+  close.addEventListener('mouseenter', () => { close.style.background = '#1e2535'; close.style.color = '#e2e8f0'; });
+  close.addEventListener('mouseleave', () => { close.style.background = 'transparent'; close.style.color = '#94a3b8'; });
+  close.addEventListener('click', () => host.remove());
+  bar.appendChild(label);
+  bar.appendChild(close);
+
+  const iframe = document.createElement('iframe');
+  iframe.src = iframeUrl;
+  iframe.style.cssText = 'position:absolute; top:30px; left:0; width:100%; height:calc(100% - 30px); border:0; background:#0f1117;';
+
+  wrap.appendChild(bar);
+  wrap.appendChild(iframe);
+  shadow.appendChild(wrap);
+  (document.body || document.documentElement).appendChild(host);
+
+  // Let the user drag the panel by its title bar.
+  let dragging = false, sx = 0, sy = 0, ox = 0, oy = 0;
+  bar.addEventListener('mousedown', e => {
+    if (e.target === close) return;
+    dragging = true;
+    const r = host.getBoundingClientRect();
+    sx = e.clientX; sy = e.clientY; ox = r.left; oy = r.top;
+    host.style.right = 'auto'; host.style.left = ox + 'px'; host.style.top = oy + 'px';
+    iframe.style.pointerEvents = 'none'; // don't lose the drag into the iframe
+    e.preventDefault();
+  });
+  window.addEventListener('mousemove', e => {
+    if (!dragging) return;
+    host.style.left = Math.max(0, ox + e.clientX - sx) + 'px';
+    host.style.top = Math.max(0, oy + e.clientY - sy) + 'px';
+  });
+  window.addEventListener('mouseup', () => { dragging = false; iframe.style.pointerEvents = ''; });
+}
+
+chrome.action.onClicked.addListener(async tab => {
+  if (!tab?.id) return;
+  try {
+    await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      func: injectOverlay,
+      args: [chrome.runtime.getURL('popup/popup.html')],
+    });
+  } catch (err) {
+    // Restricted pages (chrome://, the Web Store, PDF viewer, etc.) can't be injected into.
+    notify('Open a normal web page', "RepoDocs can't open on this page — switch to a normal website tab (e.g. a GitHub repo) and click the icon again.");
+  }
+});
+
+// Hides the overlay while a screenshot is taken, then restores it, so the panel itself never
+// appears in the captured image. Runs the toggle in the page where the overlay lives.
+async function withOverlayHidden(tabId, fn) {
+  const setHidden = hidden => {
+    const el = document.getElementById('__repodocs_overlay_host__');
+    if (el) el.style.visibility = hidden ? 'hidden' : '';
+  };
+  try { await chrome.scripting.executeScript({ target: { tabId }, func: setHidden, args: [true] }); } catch {}
+  try {
+    return await fn();
+  } finally {
+    try { await chrome.scripting.executeScript({ target: { tabId }, func: setHidden, args: [false] }); } catch {}
+  }
+}
 
 // Sanitizes a user-supplied folder name into a safe relative download path segment.
 function sanitizeFolder(name) {
@@ -307,7 +397,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     (async () => {
       try {
         const tab = await getActiveTab();
-        const dataUrl = await captureVisibleTab(tab.windowId);
+        const dataUrl = await withOverlayHidden(tab.id, () => captureVisibleTab(tab.windowId));
         sendResponse({ result: await measureDataUrl(dataUrl) });
       } catch (err) {
         sendResponse({ error: err.message });
@@ -319,9 +409,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     (async () => {
       try {
         const tab = await getActiveTab();
-        const result = await captureFullPage(tab.id, tab.windowId, stage => {
+        const result = await withOverlayHidden(tab.id, () => captureFullPage(tab.id, tab.windowId, stage => {
           chrome.runtime.sendMessage({ target: 'popup', type: 'capture:progress', stage }).catch(() => {});
-        });
+        }));
         sendResponse({ result });
       } catch (err) {
         sendResponse({ error: err.message });
@@ -333,7 +423,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     (async () => {
       try {
         const tab = await getActiveTab();
-        const result = await captureArea(tab.id, tab.windowId);
+        const result = await withOverlayHidden(tab.id, () => captureArea(tab.id, tab.windowId));
         // Stash the crop and open the full-size annotation editor in its own tab.
         await chrome.storage.local.set({ [PENDING_CROP_KEY]: result });
         await chrome.tabs.create({ url: chrome.runtime.getURL('editor/editor.html') });

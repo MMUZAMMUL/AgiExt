@@ -15,9 +15,6 @@
       "128": "icons/icon128.png"
     }
   },
-  "side_panel": {
-    "default_path": "popup/popup.html"
-  },
   "background": {
     "service_worker": "background/background.js",
     "type": "module"
@@ -32,7 +29,6 @@
     "activeTab",
     "scripting",
     "desktopCapture",
-    "sidePanel",
     "notifications"
   ],
   "host_permissions": [
@@ -58,6 +54,12 @@
     "https://api.novita.ai/*",
     "https://api.replicate.com/*",
     "https://*.lepton.run/*"
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["popup/popup.html"],
+      "matches": ["<all_urls>"]
+    }
   ],
   "minimum_chrome_version": "116"
 }
