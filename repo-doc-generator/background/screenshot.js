@@ -74,9 +74,13 @@ export async function openAndCaptureUrl(url, mode, onProgress) {
       setTimeout(resolve, 9000);
     });
     await sleep(1200);
-    if (mode === 'fullpage') return captureFullPage(tab.id, tab.windowId, onProgress);
+    // NOTE: these MUST be awaited inside the try. Returning the bare promise would let the
+    // `finally` below close the tab before the capture finishes (causing "No tab with id …")
+    // and let the rejection escape this catch, crashing the whole job instead of skipping a
+    // best-effort screenshot.
+    if (mode === 'fullpage') return await captureFullPage(tab.id, tab.windowId, onProgress);
     const dataUrl = await captureVisibleTab(tab.windowId);
-    return measureDataUrl(dataUrl);
+    return await measureDataUrl(dataUrl);
   } catch {
     return null;
   } finally {
