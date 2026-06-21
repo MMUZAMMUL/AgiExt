@@ -7,7 +7,45 @@ import { ensureOffscreen, sendToOffscreen } from './offscreen-client.js';
 import { captureVisibleTab, captureFullPage, captureArea, measureDataUrl } from './screenshot.js';
 
 const JOB_KEY = 'repodocs_job';
+const SETTINGS_KEY = 'repodocs_settings';
+const PENDING_CROP_KEY = 'repodocs_pending_crop';
 let cancelRequested = false;
+
+// Open the side panel when the toolbar icon is clicked (instead of a popup that closes on blur).
+chrome.sidePanel?.setPanelBehavior?.({ openPanelOnActionClick: true }).catch(() => {});
+
+// Sanitizes a user-supplied folder name into a safe relative download path segment.
+function sanitizeFolder(name) {
+  return String(name || '')
+    .replace(/[^a-zA-Z0-9 _\-\/]/g, '')
+    .replace(/\.+/g, '')
+    .replace(/\/+/g, '/')
+    .replace(/^\/+|\/+$/g, '')
+    .trim();
+}
+
+async function getSettings() {
+  const { [SETTINGS_KEY]: s } = await chrome.storage.local.get(SETTINGS_KEY);
+  return s || {};
+}
+
+function downloadDataUrl(url, filename) {
+  return new Promise(resolve => {
+    chrome.downloads.download({ url, filename, saveAs: false }, () => resolve(!chrome.runtime.lastError));
+  });
+}
+
+function notify(title, message) {
+  try {
+    chrome.notifications.create('', {
+      type: 'basic',
+      iconUrl: chrome.runtime.getURL('icons/icon128.png'),
+      title,
+      message,
+      priority: 2,
+    });
+  } catch { /* notifications may be unavailable; ignore */ }
+}
 
 async function getJob() {
   const { [JOB_KEY]: job } = await chrome.storage.local.get(JOB_KEY);
@@ -215,8 +253,20 @@ async function runJob({ repoInput, connections, githubToken, manualImages }) {
       finishedAt: Date.now(),
       result: { repoName: fileBaseName, pdfDataUrl, docxDataUrl },
     });
+
+    // Optional auto-save of the finished report into a Downloads subfolder.
+    const settings = await getSettings();
+    if (settings.autoSave) {
+      const folder = sanitizeFolder(settings.autoSaveFolder || 'RepoDocs') || 'RepoDocs';
+      await downloadDataUrl(pdfDataUrl, `${folder}/${fileBaseName}-documentation.pdf`);
+      await downloadDataUrl(docxDataUrl, `${folder}/${fileBaseName}-documentation.docx`);
+    }
+
+    // Desktop notification so the user sees it even if the side panel is closed/minimized.
+    notify('Documentation ready ✓', `${fileBaseName} — your PDF and Word report are ready to download.`);
   } catch (err) {
     await setJob({ status: 'error', stage: 'Failed', error: err.message, finishedAt: Date.now() });
+    if (err.message !== 'Cancelled.') notify('Documentation failed', err.message);
   } finally {
     stopKeepalive();
   }
@@ -284,10 +334,24 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       try {
         const tab = await getActiveTab();
         const result = await captureArea(tab.id, tab.windowId);
-        sendResponse({ result });
+        // Stash the crop and open the full-size annotation editor in its own tab.
+        await chrome.storage.local.set({ [PENDING_CROP_KEY]: result });
+        await chrome.tabs.create({ url: chrome.runtime.getURL('editor/editor.html') });
+        sendResponse({ result, opened: true });
       } catch (err) {
         sendResponse({ error: err.message });
       }
+    })();
+    return true;
+  }
+  // The editor (its own page) asks the background to save its annotated PNG to disk.
+  if (msg.type === 'autosave:image') {
+    (async () => {
+      const settings = await getSettings();
+      if (!settings.autoSave) return sendResponse({ ok: false, skipped: true });
+      const folder = sanitizeFolder(settings.autoSaveFolder || 'RepoDocs') || 'RepoDocs';
+      const ok = await downloadDataUrl(msg.payload.url, `${folder}/screenshots/${msg.payload.name}`);
+      sendResponse({ ok });
     })();
     return true;
   }

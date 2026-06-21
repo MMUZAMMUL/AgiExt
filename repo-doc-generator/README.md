@@ -18,7 +18,8 @@ server.
 1. Open `chrome://extensions` (or `edge://extensions`, `brave://extensions`).
 2. Enable **Developer mode** (top-right toggle).
 3. Click **Load unpacked** and select this folder (`extensions/repo-doc-generator`).
-4. Pin the extension and click its icon to open the popup.
+4. Pin the extension and click its icon to open the **side panel** (it stays open while you work,
+   including while a report is generating — unlike a popup, it won't close when you click the page).
 
 > Firefox: Manifest V3 service workers and the `chrome.offscreen` API used here are Chromium-specific.
 > A Firefox build would need a background page instead of a service worker and a different
@@ -55,9 +56,12 @@ provider's own API — never to any third-party server.
    raises GitHub's API rate limit from 60 to 5,000 requests/hour and avoids rate-limit errors.
 4. (Optional) Add your own screenshots under "Screenshots & images" — see below. They're placed
    in an organized two-up grid (multiple per page), not one per page.
-5. Click **Generate Documentation**. A progress view shows the current stage and an elapsed
-   timer.
-6. When done, click **⬇️ Download PDF file** and/or **⬇️ Download Word file (.docx)**.
+5. (Optional) Under **Auto-save**, tick the box and set a subfolder name to have captures and the
+   finished PDF/DOCX automatically saved into `Downloads/<that folder>/`.
+6. Click **Generate Documentation**. A progress view shows the current stage and an elapsed timer.
+   When it finishes you also get a **desktop notification** ("Documentation ready ✓") even if the
+   side panel is closed or minimized.
+7. When done, click **⬇️ Download PDF file** and/or **⬇️ Download Word file (.docx)**.
 
 Use the **↻ Reset** button in the header at any time to cancel and start a new document (your
 keys, repo, and screenshots are kept).
@@ -71,8 +75,11 @@ The "Screenshots & images" card lets you add pictures that get embedded in a "Sc
 Visual Reference" section of the generated document:
 
 - **📷 Visible tab** — captures exactly what's visible in your current browser tab.
-- **✂️ Select area** — dims the page and lets you drag a rectangle over any region; only that
-  region is captured and added to the gallery (press Esc to cancel).
+- **✂️ Select area** — dims the page and lets you drag a rectangle over any region; the crop opens
+  in a full-size **annotation editor** in its own tab where you can draw rectangles, circles,
+  arrows, lines, free-hand strokes and text in your choice of colors (with undo/redo and clear).
+  Click **Done** to add it to the gallery, **Copy** to put it on the clipboard, or **Save** to write
+  a PNG to disk. (Press Esc during selection to cancel.)
 - **📜 Full page** — scrolls the current tab from top to bottom and stitches the slices into
   one tall image, capturing the entire page even if it's longer than your screen.
 - **🖥️ Window/Screen** — opens Chrome's native picker (`chrome.desktopCapture`) so you can
@@ -90,8 +97,11 @@ item or it's bundled into a finished document.
 - `background/github.js` — fetches repo metadata, branches, languages, the full file tree,
   `README.md`, a handful of other `.md` docs (architecture/usage/contributing/etc.), and a
   dependency manifest (`package.json`, `requirements.txt`, etc.) via the GitHub REST API.
-- `background/screenshot.js` — visible-tab capture and full-page scroll-and-stitch capture for
-  the manual "Screenshots & images" gallery.
+- `background/screenshot.js` — visible-tab capture, drag-to-select region capture (overlay +
+  crop), and full-page scroll-and-stitch capture for the "Screenshots & images" gallery.
+- `editor/` — a full-size screenshot annotation editor (its own tab) opened after a select-area
+  crop: canvas-based rectangle/ellipse/arrow/line/pen/text tools with colors, undo/redo, and
+  Done (→ gallery) / Copy / Save actions.
 - `background/diagrams.js` — builds SVG diagrams: a folder/file structure tree and a radial
   feature mindmap derived from the detected languages, top-level modules, docs, branches, and
   manifest.
@@ -104,12 +114,17 @@ item or it's bundled into a finished document.
   assembles the final PDF (via vendored `jsPDF`) and DOCX (via vendored `docx.js`) from a
   flowing list of content **blocks** (`facts` / `section` / `diagram` / `gallery`) — entirely
   in-browser. Sections flow onto pages and screenshots render in a two-up grid.
-- `popup/` — the UI: provider keys, repo input, the screenshot/upload gallery, a header
-  **↻ Reset**, live progress, and the two download buttons. Job and gallery state are persisted
-  to `chrome.storage.local` so they survive closing and reopening the popup. Window/Screen
-  capture and clipboard-copy run directly in the popup's own DOM (rather than the background
-  service worker), since `getUserMedia`/`<video>`/`<canvas>` and the Clipboard API need a real
-  page context tied to a user gesture.
+- `popup/` — the UI, loaded as a **side panel** (so it stays open while you work and while a
+  report generates, instead of closing the instant you click the page): provider connections with
+  detect/green-status, repo input, the screenshot/upload gallery, auto-save settings, a header
+  **↻ Reset**, live progress, and the two download buttons. Job and gallery state are persisted to
+  `chrome.storage.local` so they survive reopening, and the gallery live-syncs (via
+  `chrome.storage.onChanged`) when the annotation editor adds an image. Window/Screen capture and
+  clipboard-copy run directly in the panel's own DOM (rather than the background service worker),
+  since `getUserMedia`/`<video>`/`<canvas>` and the Clipboard API need a real page context tied to
+  a user gesture.
+- Auto-save (optional) writes captures and the finished report into a `Downloads/<folder>`
+  subfolder, and a desktop notification fires when generation completes.
 
 ## Known limitations
 

@@ -42,7 +42,8 @@ AgiExt (MV3 extension monorepo)
 │     ├── ANALYZE: GitHub REST API (README + .md docs first)
 │     ├── WRITE:   ~20-provider AI catalog w/ auto-detect + failover chain
 │     ├── DRAW:    SVG structure tree + radial feature mindmap
-│     ├── CAPTURE: visible tab / select-area crop / full-page stitch / window-screen / upload
+│     ├── CAPTURE: visible tab / select-area→annotation editor / full-page / window-screen / upload
+│     ├── UI:      persistent side panel (not a popup); + desktop notifications + optional auto-save
 │     └── OUTPUT:  client-side PDF (jsPDF) + DOCX (docx.js), flowing blocks + 2-up grid
 │
 └── (future extension folders…)
@@ -75,12 +76,17 @@ pages, amber headings, a running header + page-numbered footer. Screenshots rend
 
 #### Architecture / data flow
 ```
-popup/  (UI, user gesture context)
-  │  provider keys, GitHub repo input, screenshot gallery, ↻ reset, progress, downloads
-  │  → sends "job:start" to background
+popup/  (loaded as the SIDE PANEL — persistent, doesn't close on page-click; user-gesture context)
+  │  provider connections, GitHub repo input, screenshot gallery, auto-save, ↻ reset, progress, downloads
+  │  → sends "job:start" to background; live-syncs gallery via chrome.storage.onChanged
+  ▼
+editor/  (annotation editor — its own extension tab, opened after a select-area crop)
+  editor.html/.css/.js  canvas tools (rect/ellipse/arrow/line/pen/text), colors, undo/redo,
+                        Done→append repodocs_gallery, Copy→clipboard, Save→Downloads
   ▼
 background/  (MV3 service worker, ES module — NO DOM)
-  background.js        orchestrator: analyze → write → diagram → assemble (blocks) → store result
+  background.js        orchestrator: analyze → write → diagram → assemble (blocks) → store result;
+                       also side-panel behavior, notifications, auto-save, capture:area→editor
   github.js            GitHub REST: meta, branches, languages, tree, README, .md docs, manifest
   providers.js         ~20-provider catalog (PROVIDER_CATALOG), key auto-detect, testProviderKey,
                        connections[]→engine-chain failover (OpenAI-compat + Anthropic special case)
@@ -145,6 +151,33 @@ existing `activeTab`/`scripting` perms (it injects an overlay into the current t
 ---
 
 ## 5. Changelog / decision log
+
+- **2026-06-21** — **Side panel UI, screenshot annotation editor, auto-save, desktop notifications.**
+  - **Side panel instead of popup:** the action now opens a persistent **side panel**
+    (`manifest` `side_panel.default_path` = `popup/popup.html`, `sidePanel` permission, background
+    `chrome.sidePanel.setPanelBehavior({openPanelOnActionClick:true})`; removed `action.default_popup`).
+    Fixes the user's "it closes/minimizes when I click the page while it's running" — a classic
+    popup-blur close. The same `popup/` files render as the side panel content unchanged.
+    **This also fixes the select-area crop being lost:** the old popup unloaded the moment the user
+    clicked the page to drag, abandoning the in-flight `await`. The side panel stays open.
+  - **Screenshot annotation editor** (`editor/` — `editor.html/.css/.js`, classic page in its own tab):
+    `✂️ Select area` → background `capture:area` crops the region, stashes it in
+    `repodocs_pending_crop`, and opens the editor tab. Tools: pointer, rectangle, ellipse, arrow,
+    line, free pen, text; 8 color swatches; stroke-width slider; undo/redo (Ctrl+Z / Ctrl+Shift+Z /
+    Ctrl+Y) + clear. Shapes are stored as objects and re-rendered each frame onto a canvas sized to
+    the crop's natural resolution (display→image coord mapping via `getBoundingClientRect`). **Done**
+    flattens canvas→PNG, appends to `repodocs_gallery`, optional auto-save, closes the tab. **Copy**
+    → clipboard. **Save** → `Downloads/RepoDocs/screenshots/`. The side-panel gallery live-updates via
+    a `chrome.storage.onChanged` listener on `repodocs_gallery` (editor and panel are separate
+    contexts, so they sync through storage, not messages).
+  - **Auto-save (optional):** new section-4 toggle + subfolder field (default `RepoDocs`) persisted in
+    settings. On job done, background downloads the PDF+DOCX to `Downloads/<folder>/`; every gallery
+    capture and the editor's output go to `Downloads/<folder>/screenshots/` (`autosave:image`
+    message; `sanitizeFolder()` strips unsafe path chars). Chrome can only target subfolders of the
+    user's Downloads dir — no arbitrary folder picker exists for extensions.
+  - **Desktop notifications:** `notifications` permission; background fires a `chrome.notifications`
+    toast "Documentation ready ✓" on success (and a failure toast on error) so the user is told even
+    if the side panel is closed/minimized.
 
 - **2026-06-21** — **Provider overhaul + custom-area screenshot + connection status.**
   - **~20 AI providers via a catalog** (`providers.js` `PROVIDER_CATALOG`): Groq, Cerebras,

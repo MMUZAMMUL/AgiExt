@@ -17,6 +17,8 @@ const els = {
 
   repoInput: document.getElementById('repo-input'),
   githubToken: document.getElementById('github-token'),
+  autosaveToggle: document.getElementById('autosave-toggle'),
+  autosaveFolder: document.getElementById('autosave-folder'),
   generateBtn: document.getElementById('generate-btn'),
   setupError: document.getElementById('setup-error'),
 
@@ -108,7 +110,12 @@ function persistConnections() {
 }
 
 function currentNonConnSettings() {
-  return { repoInput: els.repoInput.value.trim(), githubToken: els.githubToken.value.trim() };
+  return {
+    repoInput: els.repoInput.value.trim(),
+    githubToken: els.githubToken.value.trim(),
+    autoSave: els.autosaveToggle.checked,
+    autoSaveFolder: els.autosaveFolder.value.trim() || 'RepoDocs',
+  };
 }
 
 els.connections.addEventListener('change', e => {
@@ -210,6 +217,8 @@ async function loadSettings() {
   const { [SETTINGS_KEY]: s } = await chrome.storage.local.get(SETTINGS_KEY);
   els.repoInput.value = s?.repoInput || '';
   els.githubToken.value = s?.githubToken || '';
+  els.autosaveToggle.checked = Boolean(s?.autoSave);
+  els.autosaveFolder.value = s?.autoSaveFolder || 'RepoDocs';
   connections = Array.isArray(s?.connections) && s.connections.length
     ? s.connections.map(c => ({ ...newConnection(), ...c, status: c.status === 'connected' ? 'connected' : 'idle', error: '' }))
     : [newConnection()];
@@ -295,10 +304,14 @@ async function loadGallery() {
   renderGallery();
 }
 
-function addImageToGallery({ dataUrl, width, height, caption }) {
+async function addImageToGallery({ dataUrl, width, height, caption }) {
   gallery.push({ id: `${Date.now()}-${Math.random().toString(36).slice(2)}`, dataUrl, width, height, caption: caption || '' });
   renderGallery();
-  return persistGallery();
+  await persistGallery();
+  // Optional auto-save of the capture to disk (the background applies the folder setting).
+  if (els.autosaveToggle.checked) {
+    sendToBackground('autosave:image', { url: dataUrl, name: `${(caption || 'capture').replace(/[^a-z0-9]+/gi, '-')}-${Date.now()}.png` });
+  }
 }
 
 function renderGallery() {
@@ -390,15 +403,16 @@ els.captureAreaBtn.addEventListener('click', async () => {
   setCaptureButtonsDisabled(true);
   setCaptureStatus('Drag to select an area on the page (Esc to cancel)…');
   try {
+    // The background captures + crops, then opens the annotation editor in its own tab.
+    // The editor adds the finished image to the gallery, which streams back here live.
     const res = await sendToBackground('capture:area');
     if (res?.error) throw new Error(res.error);
-    await addImageToGallery({ ...res.result, caption: 'Custom area capture' });
-    setCaptureStatus('Captured.');
+    setCaptureStatus('Opened the editor in a new tab — annotate, then click Done.');
   } catch (err) {
     setCaptureStatus(err.message === 'Selection cancelled.' ? '' : `Capture failed: ${err.message}`);
   } finally {
     setCaptureButtonsDisabled(false);
-    setTimeout(() => setCaptureStatus(''), 2000);
+    setTimeout(() => setCaptureStatus(''), 2500);
   }
 });
 
@@ -518,6 +532,18 @@ async function init() {
 chrome.runtime.onMessage.addListener(msg => {
   if (msg?.target === 'popup' && msg.type === 'job:update') renderJob(msg.job);
   if (msg?.target === 'popup' && msg.type === 'capture:progress') onCaptureProgress(msg);
+});
+
+// Persist the auto-save preference as the user toggles/edits it.
+els.autosaveToggle.addEventListener('change', saveSettings);
+els.autosaveFolder.addEventListener('input', saveSettings);
+
+// Keep the gallery in sync when the annotation editor (a separate tab) adds an image.
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === 'local' && changes[GALLERY_KEY]) {
+    gallery = Array.isArray(changes[GALLERY_KEY].newValue) ? changes[GALLERY_KEY].newValue : [];
+    renderGallery();
+  }
 });
 
 els.generateBtn.addEventListener('click', async () => {
