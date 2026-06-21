@@ -43,7 +43,7 @@ AgiExt (MV3 extension monorepo)
 │     ├── WRITE:   ~20-provider AI catalog w/ auto-detect + failover chain
 │     ├── DRAW:    SVG structure tree + radial feature mindmap
 │     ├── CAPTURE: visible tab / select-area→annotation editor / full-page / window-screen / upload
-│     ├── UI:      persistent side panel (not a popup); + desktop notifications + optional auto-save
+│     ├── UI:      persistent floating window (not a popup, not a side panel); + desktop notifications + optional auto-save
 │     └── OUTPUT:  client-side PDF (jsPDF) + DOCX (docx.js), flowing blocks + 2-up grid
 │
 └── (future extension folders…)
@@ -76,7 +76,7 @@ pages, amber headings, a running header + page-numbered footer. Screenshots rend
 
 #### Architecture / data flow
 ```
-popup/  (loaded as the SIDE PANEL — persistent, doesn't close on page-click; user-gesture context)
+popup/  (loaded in its own FLOATING WINDOW — persistent, doesn't close on page-click; user-gesture context)
   │  provider connections, GitHub repo input, screenshot gallery, auto-save, ↻ reset, progress, downloads
   │  → sends "job:start" to background; live-syncs gallery via chrome.storage.onChanged
   ▼
@@ -86,7 +86,7 @@ editor/  (annotation editor — its own extension tab, opened after a select-are
   ▼
 background/  (MV3 service worker, ES module — NO DOM)
   background.js        orchestrator: analyze → write → diagram → assemble (blocks) → store result;
-                       also side-panel behavior, notifications, auto-save, capture:area→editor
+                       also floating-window-open behavior, notifications, auto-save, capture:area→editor
   github.js            GitHub REST: meta, branches, languages, tree, README, .md docs, manifest
   providers.js         ~20-provider catalog (PROVIDER_CATALOG), key auto-detect, testProviderKey,
                        connections[]→engine-chain failover (OpenAI-compat + Anthropic special case)
@@ -152,6 +152,18 @@ existing `activeTab`/`scripting` perms (it injects an overlay into the current t
 
 ## 5. Changelog / decision log
 
+- **2026-06-21** — **Replaced the side panel with a standalone floating window.** User feedback:
+  the side panel docks into the browser frame and shrinks the page's viewport width, which breaks
+  capture/layout on responsive sites (GitHub included) — "many sites even github not allow to
+  capture this way." Reverted `manifest.json` (`side_panel` key + `sidePanel` permission removed)
+  and `background.js`'s `chrome.sidePanel.setPanelBehavior(...)`. The toolbar icon now has a
+  `chrome.action.onClicked` listener that opens `popup/popup.html` in its own `chrome.windows.create`
+  popup-type window (440×760), tracking the window id in `chrome.storage.session` so a second click
+  focuses the existing window instead of opening a duplicate; `chrome.windows.onRemoved` clears the
+  tracked id when the user closes it. This keeps the "doesn't close when you click the page" fix
+  (a real OS-level window is independent of the page tab) without embedding into the browser UI or
+  resizing the page. `popup/popup.css` body width changed from a fixed `360px` to `100%` so it
+  fills the new window instead of leaving dead space.
 - **2026-06-21** — **Side panel UI, screenshot annotation editor, auto-save, desktop notifications.**
   - **Side panel instead of popup:** the action now opens a persistent **side panel**
     (`manifest` `side_panel.default_path` = `popup/popup.html`, `sidePanel` permission, background

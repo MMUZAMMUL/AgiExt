@@ -11,8 +11,35 @@ const SETTINGS_KEY = 'repodocs_settings';
 const PENDING_CROP_KEY = 'repodocs_pending_crop';
 let cancelRequested = false;
 
-// Open the side panel when the toolbar icon is clicked (instead of a popup that closes on blur).
-chrome.sidePanel?.setPanelBehavior?.({ openPanelOnActionClick: true }).catch(() => {});
+// Open the UI as its own floating browser window instead of the default action popup (which
+// closes the instant it loses focus) or a side panel (which docks into the browser frame and
+// shrinks the page's viewport — breaking capture/layout on responsive sites, GitHub included).
+// A standalone window is independent of the page tab, so clicking back on the page never closes it.
+const POPUP_WINDOW_KEY = 'repodocs_window_id';
+
+chrome.action.onClicked.addListener(async () => {
+  const { [POPUP_WINDOW_KEY]: winId } = await chrome.storage.session.get(POPUP_WINDOW_KEY);
+  if (winId) {
+    try {
+      await chrome.windows.update(winId, { focused: true });
+      return;
+    } catch {
+      // Window was already closed; fall through and open a new one.
+    }
+  }
+  const win = await chrome.windows.create({
+    url: chrome.runtime.getURL('popup/popup.html'),
+    type: 'popup',
+    width: 440,
+    height: 760,
+  });
+  await chrome.storage.session.set({ [POPUP_WINDOW_KEY]: win.id });
+});
+
+chrome.windows.onRemoved.addListener(async closedId => {
+  const { [POPUP_WINDOW_KEY]: winId } = await chrome.storage.session.get(POPUP_WINDOW_KEY);
+  if (closedId === winId) await chrome.storage.session.remove(POPUP_WINDOW_KEY);
+});
 
 // Sanitizes a user-supplied folder name into a safe relative download path segment.
 function sanitizeFolder(name) {
