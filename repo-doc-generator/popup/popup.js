@@ -15,7 +15,6 @@ const els = {
   keyOpenrouter: document.getElementById('key-openrouter'),
   repoInput: document.getElementById('repo-input'),
   githubToken: document.getElementById('github-token'),
-  captureScreenshot: document.getElementById('capture-screenshot'),
   generateBtn: document.getElementById('generate-btn'),
   setupError: document.getElementById('setup-error'),
 
@@ -62,7 +61,6 @@ function readSettings() {
     openrouter: els.keyOpenrouter.value.trim(),
     githubToken: els.githubToken.value.trim(),
     repoInput: els.repoInput.value.trim(),
-    captureScreenshot: els.captureScreenshot.checked,
   };
 }
 
@@ -79,7 +77,6 @@ async function loadSettings() {
   els.keyOpenrouter.value = s.openrouter || '';
   els.githubToken.value = s.githubToken || '';
   els.repoInput.value = s.repoInput || '';
-  els.captureScreenshot.checked = Boolean(s.captureScreenshot);
 }
 
 function sendToBackground(type, payload) {
@@ -385,17 +382,12 @@ els.generateBtn.addEventListener('click', async () => {
 
   await saveSettings();
 
-  if (settings.captureScreenshot) {
-    await sendToBackground('request-screenshot-permission');
-  }
-
   currentRepoLabel = settings.repoInput;
   els.generateBtn.disabled = true;
   await sendToBackground('job:start', {
     repoInput: settings.repoInput,
     keys: { groq: settings.groq, cerebras: settings.cerebras, gemini: settings.gemini, openrouter: settings.openrouter },
     githubToken: settings.githubToken,
-    captureScreenshot: settings.captureScreenshot,
     manualImages: gallery.map(g => ({ dataUrl: g.dataUrl, width: g.width, height: g.height, caption: g.caption })),
   });
   els.generateBtn.disabled = false;

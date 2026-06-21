@@ -1,9 +1,7 @@
 // RepoDocs AI — non-GitHub website analysis. ES module, imported by background.js.
-// Fetches the page HTML (relies on the optional <all_urls> host permission), hands it to the
-// offscreen document for DOMParser-based extraction (a service worker has no DOMParser), and
-// captures a full-page screenshot via screenshot.js.
+// Fetches the page HTML (relies on the optional <all_urls> host permission) and hands it to the
+// offscreen document for DOMParser-based extraction (a service worker has no DOMParser).
 import { ensureOffscreen, sendToOffscreen } from './offscreen-client.js';
-import { openAndCaptureUrl } from './screenshot.js';
 
 export function isLikelyGithubInput(input) {
   const cleaned = input.trim();
@@ -22,8 +20,5 @@ export async function analyzeWebsite(url, onProgress) {
   await ensureOffscreen();
   const parsed = await sendToOffscreen('parse-html', { html: html.slice(0, 500000) });
 
-  onProgress?.('Capturing full-page screenshot…');
-  const screenshot = await openAndCaptureUrl(url, 'fullpage', onProgress);
-
-  return { url, ...parsed, screenshot };
+  return { url, ...parsed };
 }

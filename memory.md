@@ -108,12 +108,16 @@ desktopCapture` + host perms for GitHub/raw + the 4 AI providers. `<all_urls>` i
 (requested only when capturing a live-app / website screenshot).
 
 #### Known gotchas / fragile spots
-- **Best-effort screenshots must be `await`ed inside their try/finally.** If a capture promise
-  is returned without `await`, the `finally` closes the throwaway tab early → `No tab with id …`
-  → and the rejection escapes the catch and crashes the whole job. (See changelog 2026-06-21.)
+- **No auto live-app/website screenshot** — that feature was removed (it opened a throwaway
+  tab and was the source of "No tab with id …"). Screenshots are now only added manually via
+  the gallery. If re-adding any "open a tab and capture it" flow, the capture MUST be `await`ed
+  inside its try/finally, or the `finally` closes the tab early and the rejection escapes the
+  catch and crashes the whole job. (See changelog 2026-06-21.)
 - Long AI jobs risk SW termination; an `alarms` keepalive (every 0.5 min) mitigates it.
 - Very large repos → truncated structure diagram; may need a GitHub token (60 → 5,000 req/hr).
-- Live screenshot needs the optional `<all_urls>` grant and briefly opens/closes a tab.
+- Website mode still `fetch`es page HTML, which needs the optional `<all_urls>` host grant;
+  there is no longer in-app UI to request it, so website mode may need the permission granted
+  manually. GitHub mode is unaffected (its host permissions are declared in the manifest).
 
 ---
 
@@ -127,6 +131,16 @@ desktopCapture` + host perms for GitHub/raw + the 4 AI providers. `<all_urls>` i
 
 ## 5. Changelog / decision log
 
+- **2026-06-21** — **Removed the automatic live-app / website screenshot feature** from
+  RepoDocs AI. Even after the `await` fix, opening a throwaway tab to screenshot a live URL
+  was still the source of "Something went wrong / No tab with id …" on Generate, and it isn't
+  needed — users add their own images via the manual gallery (visible-tab / full-page /
+  window-screen / upload), which is unaffected. Removed: the "capture live app" checkbox
+  (popup.html/.js), the GitHub `Live Application` page + capture block and the website
+  `Live Page Screenshot` page + auto-capture (background.js), the website screenshot step
+  (website.js), the now-unused `openAndCaptureUrl()` (screenshot.js), and the
+  `request-screenshot-permission` handler. Manual capture helpers
+  (`captureVisibleTab` / `captureFullPage` / `measureDataUrl`) are kept — the gallery uses them.
 - **2026-06-21** — Fixed job-crashing bug `No tab with id: …` / "Something went wrong" on
   Generate. Root cause: in `repo-doc-generator/background/screenshot.js`,
   `openAndCaptureUrl()` returned `captureFullPage(...)` / `measureDataUrl(...)` **without

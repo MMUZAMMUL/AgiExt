@@ -55,35 +55,3 @@ export async function captureFullPage(tabId, windowId, onProgress) {
     scrollHeight: metrics.scrollHeight,
   });
 }
-
-// Opens `url` in a new tab, captures it (visible or full page), then closes the tab.
-// Best-effort: returns null on any failure rather than throwing, since this is always
-// a supplementary feature (live screenshot / website preview), never the critical path.
-export async function openAndCaptureUrl(url, mode, onProgress) {
-  let tab;
-  try {
-    tab = await chrome.tabs.create({ url, active: true });
-    await new Promise(resolve => {
-      const listener = (tabId, info) => {
-        if (tabId === tab.id && info.status === 'complete') {
-          chrome.tabs.onUpdated.removeListener(listener);
-          resolve();
-        }
-      };
-      chrome.tabs.onUpdated.addListener(listener);
-      setTimeout(resolve, 9000);
-    });
-    await sleep(1200);
-    // NOTE: these MUST be awaited inside the try. Returning the bare promise would let the
-    // `finally` below close the tab before the capture finishes (causing "No tab with id …")
-    // and let the rejection escape this catch, crashing the whole job instead of skipping a
-    // best-effort screenshot.
-    if (mode === 'fullpage') return await captureFullPage(tab.id, tab.windowId, onProgress);
-    const dataUrl = await captureVisibleTab(tab.windowId);
-    return await measureDataUrl(dataUrl);
-  } catch {
-    return null;
-  } finally {
-    if (tab) await chrome.tabs.remove(tab.id).catch(() => {});
-  }
-}

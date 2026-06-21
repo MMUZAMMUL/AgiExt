@@ -3,8 +3,8 @@
 A browser extension (Manifest V3 — Chrome, Edge, Brave, and other Chromium browsers) that
 points at any public GitHub repository **or any website URL** and generates a professional,
 5–10 page **PDF and DOCX** document: an executive overview, architecture/feature breakdown, a
-repository structure diagram or site map, a feature mindmap, setup/usage or UX notes, an
-optional live screenshot, your own manually captured or uploaded screenshots, and a
+repository structure diagram or site map, a feature mindmap, setup/usage or UX notes, your own
+manually captured or uploaded screenshots, and a
 conclusion — all written by an AI model using *your own* free API key, and assembled entirely
 client-side in your browser. Nothing is uploaded to any server.
 
@@ -42,20 +42,18 @@ any third-party server.
 3. (Optional, GitHub only) Add a GitHub personal access token if you're documenting a large
    repo — this raises GitHub's API rate limit from 60 to 5,000 requests/hour and avoids
    rate-limit errors.
-4. (Optional, GitHub only) Check "Try to capture a screenshot of the live app" if the repo
-   links to a live deployment. This requests a one-time browser permission and briefly
-   opens/closes a tab. For website URLs, a full-page screenshot of the site itself is always
-   captured automatically.
-5. (Optional) Add your own screenshots under "Screenshots & images" — see below.
-6. Click **Generate Documentation**. A progress view shows the current stage and an elapsed
+4. (Optional) Add your own screenshots under "Screenshots & images" — see below.
+5. Click **Generate Documentation**. A progress view shows the current stage and an elapsed
    timer — full analysis typically takes a few minutes.
-7. When done, click **Download PDF** and/or **Download DOCX**.
+6. When done, click **Download PDF** and/or **Download DOCX**.
+
+> Note: there is no automatic "open the live app and screenshot it" step — add any screenshots
+> you want via the manual "Screenshots & images" gallery below.
 
 ### Screenshots & images
 
 The "Screenshots & images" card lets you add pictures that get embedded in a "Screenshots &
-Visual Reference" section of the generated document, in addition to (or instead of) the
-automatic live-app/site screenshot:
+Visual Reference" section of the generated document:
 
 - **📷 Visible tab** — captures exactly what's visible in your current browser tab.
 - **📜 Full page** — scrolls the current tab from top to bottom and stitches the slices into
@@ -78,9 +76,8 @@ item or it's bundled into a finished document.
 - `background/website.js` — for non-GitHub input: fetches the page HTML (via the optional
   `<all_urls>` permission) and hands it to the offscreen document for `DOMParser`-based
   extraction of title, description, headings, and navigation links.
-- `background/screenshot.js` — visible-tab capture, full-page scroll-and-stitch capture, and
-  capturing an arbitrary URL in a throwaway tab (used for the optional live-app/site
-  screenshot).
+- `background/screenshot.js` — visible-tab capture and full-page scroll-and-stitch capture for
+  the manual "Screenshots & images" gallery.
 - `background/diagrams.js` — builds SVG diagrams: a folder/file structure tree (GitHub) or a
   radial feature mindmap derived from the detected languages, top-level modules, branches/nav
   links, and manifest.
@@ -102,9 +99,10 @@ item or it's bundled into a finished document.
 
 - Very large repositories (tens of thousands of files) will produce a truncated structure
   diagram and may need a GitHub token to avoid rate limiting.
-- The live-app/site screenshot is best-effort: it requires the optional `<all_urls>`
-  permission, briefly opens the target tab, and silently skips if the page doesn't finish
-  loading in time.
+- There is no automatic live-app/website screenshot — add screenshots manually via the
+  "Screenshots & images" gallery.
+- Website mode still fetches the page HTML, which needs the optional `<all_urls>` host
+  permission granted to the extension; GitHub mode works out of the box.
 - Private repositories require a GitHub token with appropriate access scopes.
 - Window/Screen capture requires picking a source in Chrome's native picker each time — Chrome
   does not allow extensions to remember a previous selection.
