@@ -112,7 +112,7 @@ function splitParagraphs(text) {
 }
 
 // ---------- PDF (flowing layout) ----------
-function buildPdf({ cover, blocks, footerLabel }) {
+async function buildPdf({ cover, blocks, footerLabel }) {
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF({ unit: 'pt', format: 'a4', compress: true });
   let y = 0;
@@ -213,6 +213,10 @@ function buildPdf({ cover, blocks, footerLabel }) {
 
   function diagramBlock(title, img, caption) {
     if (!img) return;
+    // Reserve room for the heading + a worthwhile chunk of the image before committing to this
+    // page, so the heading never gets stranded alone with the image pushed to the next page.
+    const minImgH = 180;
+    if (PAGE_H - 50 - y < 40 + minImgH) newContentPage();
     heading(title);
     const avail = PAGE_H - 50 - y;
     let { w, h } = fitImage(CONTENT_W, Math.min(avail, 460), img.width, img.height);
@@ -234,10 +238,57 @@ function buildPdf({ cover, blocks, footerLabel }) {
     y += 6;
   }
 
-  // Two-up image grid; size-adjusted so multiple screenshots share a page.
-  function galleryBlock(title, images) {
+  // Tall/narrow captures (e.g. full-page scroll screenshots) don't belong in the fixed-height
+  // grid cells below — squeezing them in shrinks them to a tiny sliver and leaves the rest of
+  // the page blank. Instead render them at full content width, slicing the source image across
+  // as many pages as needed so every page is filled edge-to-edge with no distortion.
+  function isTallImage(im) {
+    return im.height / im.width > 1.3;
+  }
+
+  async function tallImageBlock(im) {
+    const scale = CONTENT_W / im.width;
+    let firstBudgetPt = PAGE_H - 50 - y - 10;
+    if (firstBudgetPt < 100) { newContentPage(); firstBudgetPt = PAGE_H - 50 - y - 10; }
+    const freshBudgetPt = PAGE_H - 50 - 62 - 10;
+    const img = await loadImage(im.dataUrl);
+    let yPx = 0;
+    let firstPage = true;
+    while (yPx < im.height) {
+      const budgetPt = firstPage ? firstBudgetPt : freshBudgetPt;
+      const maxSlicePx = Math.max(1, Math.floor(budgetPt / scale));
+      const sliceH = Math.min(maxSlicePx, im.height - yPx);
+      const canvas = document.createElement('canvas');
+      canvas.width = im.width;
+      canvas.height = sliceH;
+      canvas.getContext('2d').drawImage(img, 0, yPx, im.width, sliceH, 0, 0, im.width, sliceH);
+      const renderH = sliceH * scale;
+      if (!firstPage) newContentPage();
+      doc.addImage(canvas.toDataURL('image/png'), 'PNG', MARGIN, y, CONTENT_W, renderH);
+      y += renderH + 8;
+      yPx += sliceH;
+      firstPage = false;
+    }
+    if (im.caption) {
+      if (y + 20 > PAGE_H - 50) newContentPage();
+      doc.setFont('helvetica', 'italic');
+      doc.setFontSize(8.5);
+      doc.setTextColor(120, 120, 120);
+      doc.text(im.caption, PAGE_W / 2, y, { align: 'center' });
+      doc.setFont('helvetica', 'normal');
+      y += 16;
+    }
+  }
+
+  // Two-up image grid for normally-proportioned screenshots; tall/full-page captures are
+  // rendered full-width (and sliced across pages) by tallImageBlock above so they always fill
+  // the page instead of shrinking down to a sliver inside a fixed-height grid cell.
+  async function galleryBlock(title, images) {
     if (!images?.length) return;
     heading(title);
+    const normal = images.filter(im => !isTallImage(im));
+    const tall = images.filter(isTallImage);
+
     const cols = 2;
     const gap = 14;
     const cellW = (CONTENT_W - gap * (cols - 1)) / cols;
@@ -246,7 +297,7 @@ function buildPdf({ cover, blocks, footerLabel }) {
     let rowTop = y;
     let rowH = 0;
 
-    for (const im of images) {
+    for (const im of normal) {
       if (col === 0) {
         ensure(cellMaxH + 34);
         rowTop = y;
@@ -274,6 +325,8 @@ function buildPdf({ cover, blocks, footerLabel }) {
       }
     }
     if (col !== 0) y = rowTop + rowH + 16;
+
+    for (const im of tall) await tallImageBlock(im);
   }
 
   // ---- Cover ----
@@ -301,7 +354,7 @@ function buildPdf({ cover, blocks, footerLabel }) {
     if (block.type === 'facts') factsBlock(block.items);
     else if (block.type === 'section') { heading(block.title); bodyText(block.text); }
     else if (block.type === 'diagram') diagramBlock(block.title, block.image, block.caption);
-    else if (block.type === 'gallery') galleryBlock(block.title, block.images);
+    else if (block.type === 'gallery') await galleryBlock(block.title, block.images);
   }
 
   return doc.output('datauristring');
@@ -361,7 +414,13 @@ async function buildDocx({ cover, blocks, footerLabel }) {
     } else if (block.type === 'gallery') {
       if (block.images?.length) {
         children.push(heading(block.title));
-        for (const im of block.images) children.push(...imagePara(im, im.caption, 300));
+        for (const im of block.images) {
+          // Tall/narrow captures (full-page scroll shots) look like tiny slivers at the normal
+          // gallery width — give them the full content width instead so they render at a
+          // readable size; Word paginates a tall image across pages automatically.
+          const isTall = im.height / im.width > 1.3;
+          children.push(...imagePara(im, im.caption, isTall ? 480 : 300));
+        }
       }
     }
   }
@@ -391,7 +450,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         const result = await cropToRect(msg.payload);
         sendResponse({ result });
       } else if (msg.type === 'build-pdf') {
-        const result = buildPdf(msg.payload);
+        const result = await buildPdf(msg.payload);
         sendResponse({ result });
       } else if (msg.type === 'build-docx') {
         const result = await buildDocx(msg.payload);
